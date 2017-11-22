@@ -13,6 +13,7 @@
        html_root_url = "https://doc.rust-lang.org/nightly/",
        html_playground_url = "https://play.rust-lang.org/")]
 #![deny(warnings)]
+#![allow(warnings)]
 
 #![feature(ascii_ctype)]
 #![feature(rustc_private)]
@@ -25,6 +26,7 @@
 #![feature(test)]
 #![feature(unicode)]
 #![feature(vec_remove_item)]
+#![feature(entry_and_modify)]
 
 extern crate arena;
 extern crate getopts;
@@ -535,7 +537,7 @@ where R: 'static + Send, F: 'static + Send + FnOnce(Output) -> R {
 
         let (mut krate, renderinfo) =
             core::run_core(paths, cfgs, externs, Input::File(cratefile), triple, maybe_sysroot,
-                           display_warnings, force_unstable_if_unmarked, render_type);
+                           display_warnings, crate_name.clone(), force_unstable_if_unmarked, render_type);
 
         info!("finished with rustc");
 

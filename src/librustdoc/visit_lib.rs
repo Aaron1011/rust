@@ -53,6 +53,7 @@ impl<'a, 'tcx, 'rcx> LibEmbargoVisitor<'a, 'tcx, 'rcx> {
         let is_hidden = self.cx.tcx.get_attrs(did).lists("doc").has_word("hidden");
 
         let old_level = self.access_levels.map.get(&did).cloned();
+
         // Accessibility levels can only grow
         if level > old_level && !is_hidden {
             self.access_levels.map.insert(did, level.unwrap());

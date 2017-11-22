@@ -36,6 +36,9 @@ pub struct VisSpace<'a>(pub &'a Option<clean::Visibility>);
 /// space after it.
 #[derive(Copy, Clone)]
 pub struct UnsafetySpace(pub hir::Unsafety);
+/// Similar to VisSpace, but used for 'auto trait' status
+#[derive(Copy, Clone)]
+pub struct AutoSpace(pub bool);
 /// Similarly to VisSpace, this structure is used to render a function constness
 /// with a space after it.
 #[derive(Copy, Clone)]
@@ -92,6 +95,12 @@ impl UnsafetySpace {
 impl ConstnessSpace {
     pub fn get(&self) -> hir::Constness {
         let ConstnessSpace(v) = *self; v
+    }
+}
+
+impl AutoSpace {
+    pub fn get(&self) -> bool {
+        self.0
     }
 }
 
@@ -728,7 +737,8 @@ fn fmt_type(t: &clean::Type, f: &mut fmt::Formatter, use_absolute: bool) -> fmt:
                     write!(f, "{}", name)
                 }
             }
-        }
+        },
+        clean::DotDot => f.write_str(".."),
         clean::Unique(..) => {
             panic!("should have been cleaned")
         }
@@ -954,6 +964,13 @@ impl fmt::Display for ConstnessSpace {
             hir::Constness::Const => write!(f, "const "),
             hir::Constness::NotConst => Ok(())
         }
+    }
+}
+
+
+impl fmt::Display for AutoSpace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.get() { write!(f, "auto ") } else { Ok(()) }
     }
 }
 
