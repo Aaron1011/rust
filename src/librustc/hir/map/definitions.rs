@@ -72,6 +72,10 @@ impl DefPathTable {
         index
     }
 
+    pub fn next_id(&self, address_space: DefIndexAddressSpace) -> DefIndex {
+        DefIndex::new(self.index_to_key[address_space.index()].len() + address_space.start())
+    }
+
     #[inline(always)]
     pub fn def_key(&self, index: DefIndex) -> DefKey {
         self.index_to_key[index.address_space().index()]

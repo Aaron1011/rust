@@ -1129,7 +1129,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
 
     /// Returns whether the trait predicate may apply for *some* assignment
     /// to the type parameters.
-    fn predicate_can_apply(&self,
+    pub fn predicate_can_apply(&self,
                            param_env: ty::ParamEnv<'tcx>,
                            pred: ty::PolyTraitRef<'tcx>)
                            -> bool {

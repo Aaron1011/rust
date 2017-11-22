@@ -3307,6 +3307,10 @@ impl<'tcx> SelectionCache<'tcx> {
             hashmap: RefCell::new(FxHashMap())
         }
     }
+
+    pub fn clear(&self) {
+        *self.hashmap.borrow_mut() = FxHashMap()
+    }
 }
 
 impl<'tcx> EvaluationCache<'tcx> {
@@ -3314,6 +3318,10 @@ impl<'tcx> EvaluationCache<'tcx> {
         EvaluationCache {
             hashmap: RefCell::new(FxHashMap())
         }
+    }
+
+    pub fn clear(&self) {
+        *self.hashmap.borrow_mut() = FxHashMap()
     }
 }
 

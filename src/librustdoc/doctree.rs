@@ -196,6 +196,7 @@ pub struct Constant {
 }
 
 pub struct Trait {
+    pub auto: bool,
     pub unsafety: hir::Unsafety,
     pub name: Name,
     pub items: hir::HirVec<hir::TraitItem>,
@@ -209,6 +210,7 @@ pub struct Trait {
     pub depr: Option<attr::Deprecation>,
 }
 
+#[derive(Debug)]
 pub struct Impl {
     pub unsafety: hir::Unsafety,
     pub polarity: hir::ImplPolarity,
@@ -223,6 +225,15 @@ pub struct Impl {
     pub stab: Option<attr::Stability>,
     pub depr: Option<attr::Deprecation>,
     pub id: ast::NodeId,
+}
+
+#[derive(Debug)]
+pub struct AutoImpl {
+    pub unsafety: hir::Unsafety,
+    pub trait_: hir::TraitRef,
+    pub id: ast::NodeId,
+    pub attrs: hir::HirVec<ast::Attribute>,
+    pub whence: Span,
 }
 
 // For Macro we store the DefId instead of the NodeId, since we also create

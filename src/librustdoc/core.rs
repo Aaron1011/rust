@@ -11,7 +11,7 @@
 use rustc_lint;
 use rustc_driver::{driver, target_features, abort_on_err};
 use rustc::session::{self, config};
-use rustc::hir::def_id::DefId;
+use rustc::hir::def_id::{DefId, DefIndexAddressSpace, LOCAL_CRATE};
 use rustc::hir::def::Def;
 use rustc::middle::privacy::AccessLevels;
 use rustc::ty::{self, TyCtxt, AllArenas};
@@ -62,6 +62,8 @@ pub struct DocContext<'a, 'tcx: 'a> {
     pub ty_substs: RefCell<FxHashMap<Def, clean::Type>>,
     /// Table node id of lifetime parameter definition -> substituted lifetime
     pub lt_substs: RefCell<FxHashMap<DefId, clean::Lifetime>>,
+    pub send_trait: Option<DefId>,
+    pub fake_def_id: Cell<DefId>
 }
 
 impl<'a, 'tcx> DocContext<'a, 'tcx> {
@@ -209,6 +211,12 @@ pub fn run_core(search_paths: SearchPaths,
             renderinfo: Default::default(),
             ty_substs: Default::default(),
             lt_substs: Default::default(),
+            send_trait: clean::get_trait_def_id(&tcx, &["core", "marker", "Send"]),
+            fake_def_id: Cell::new(DefId {
+                krate: LOCAL_CRATE,
+                index: tcx.hir.definitions().def_path_table().next_id(DefIndexAddressSpace::Low)
+
+            })
         };
         debug!("crate: {:?}", tcx.hir.krate());
 

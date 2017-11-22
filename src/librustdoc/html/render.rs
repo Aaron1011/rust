@@ -68,7 +68,7 @@ use fold::DocFolder;
 use html::escape::Escape;
 use html::format::{ConstnessSpace};
 use html::format::{TyParamBounds, WhereClause, href, AbiSpace};
-use html::format::{VisSpace, Method, UnsafetySpace, MutableSpace};
+use html::format::{VisSpace, Method, UnsafetySpace, MutableSpace, AutoSpace};
 use html::format::fmt_impl_for_trait_page;
 use html::item_type::ItemType;
 use html::markdown::{self, Markdown, MarkdownHtml, MarkdownSummaryLine, RenderType};
@@ -174,6 +174,29 @@ pub enum ExternalLocation {
 }
 
 /// Metadata about implementations for a type or trait.
+pub struct Implementor {
+    pub def_id: DefId,
+    pub stability: Option<clean::Stability>,
+    pub item: clean::Item,
+}
+
+impl Implementor {
+    fn inner_impl(&self) -> &clean::Impl {
+        match self.item.inner {
+            clean::ImplItem(ref impl_) => impl_,
+            _ => panic!("non-impl item found in impl")
+        }
+    }
+}
+
+/*/// Metadata about a legacy auto-imppl of a trait.
+pub struct AutoImplementor {
+    pub def_id: DefId,
+    pub stability: Option<clean::Stability>,
+    pub impl_: clean::AutoImpl
+}*/
+
+/// Metadata about implementations for a type.
 #[derive(Clone)]
 pub struct Impl {
     pub impl_item: clean::Item,
@@ -273,6 +296,12 @@ pub struct Cache {
     /// implementors of the trait, and this mapping is exactly, that: a mapping
     /// of trait ids to the list of known implementors of the trait
     pub implementors: FxHashMap<DefId, Vec<Impl>>,
+
+    /*/// This map holds any legacy auto implementations
+    /// (i.e. 'impl Trait for ..') for a trait.
+    /// Once the legacy syntax is removed in favor of 'auto Trait {}',
+    /// this will no longer be needed
+    pub auto_implementors: FxHashMap<DefId, Vec<AutoImplementor>>,*/
 
     /// Cache of where external crate documentation can be found.
     pub extern_locations: FxHashMap<CrateNum, (String, PathBuf, ExternalLocation)>,
@@ -579,6 +608,7 @@ pub fn run(mut krate: clean::Crate,
         external_paths,
         paths: FxHashMap(),
         implementors: FxHashMap(),
+        //auto_implementors: FxHashMap(),
         stack: Vec::new(),
         parent_stack: Vec::new(),
         search_index: Vec::new(),
@@ -1191,13 +1221,36 @@ impl DocFolder for Cache {
             if !self.masked_crates.contains(&item.def_id.krate) {
                 if let Some(did) = i.trait_.def_id() {
                     if i.for_.def_id().map_or(true, |d| !self.masked_crates.contains(&d.krate)) {
+<<<<<<< HEAD
                         self.implementors.entry(did).or_insert(vec![]).push(Impl {
                             impl_item: item.clone(),
+=======
+                        self.implementors.entry(did).or_insert(vec![]).push(Implementor {
+                            def_id: item.def_id,
+                            stability: item.stability.clone(),
+                            item: item.clone()
+>>>>>>> Generate documentation for auto-trait impls
                         });
                     }
                 }
             }
         }
+
+        // Collect all legacy auto implementations ('impl Trait for ..')
+        /*if let clean::AutoImpl(ref i) = item.inner {
+            if !self.masked_crates.contains(&item.def_id.krate) {
+                if let Some(did) = i.trait_.def_id() {
+                    if i.for_.def_id().map_or(true, |d| !self.masked_crates.contains(&d.krate)) {
+                        self.auto_implementors.entry(did).or_insert(vec![]).push(AutoImplementor {
+                            def_id: item.def_id,
+                            stability: item.stability.clone(),
+                            impl_: i.clone(),
+                        });
+                    }
+                }
+            }
+        }*/
+
 
         // Index this method for searching later on.
         if let Some(ref s) = item.name {
@@ -1964,8 +2017,17 @@ fn item_module(w: &mut fmt::Formatter, cx: &Context,
                item: &clean::Item, items: &[clean::Item]) -> fmt::Result {
     document(w, cx, item)?;
 
+<<<<<<< HEAD
     let mut indices = (0..items.len()).filter(|i| !items[*i].is_stripped())
                                       .collect::<Vec<usize>>();
+=======
+    let mut indices = (0..items.len()).filter(|i| {
+        if items[*i].is_auto_impl() {
+            return false;
+        }
+        !items[*i].is_stripped()
+    }).collect::<Vec<usize>>();
+>>>>>>> Generate documentation for auto-trait impls
 
     // the order of item types in the listing
     fn reorder(ty: ItemType) -> u8 {
@@ -2315,6 +2377,25 @@ fn item_function(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
     document(w, cx, it)
 }
 
+<<<<<<< HEAD
+=======
+fn implementor2item(cache: &Cache, imp : &Implementor) -> Option<clean::Item> {
+    if imp.inner_impl().for_ == clean::DotDot {
+        debug!("implementor2item() called with DotDot");
+        return Some(imp.item.clone());
+    }
+    if let Some(t_did) = imp.inner_impl().for_.def_id() {
+        if let Some(impl_item) = cache.impls.get(&t_did).and_then(|i| i.iter()
+            .find(|i| i.impl_item.def_id == imp.def_id))
+        {
+            let i = &impl_item.impl_item;
+            return Some(i.clone());
+        }
+    }
+    None
+}
+
+>>>>>>> Generate documentation for auto-trait impls
 fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
               t: &clean::Trait) -> fmt::Result {
     let mut bounds = String::new();
@@ -2339,9 +2420,10 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
     // Output the trait definition
     write!(w, "<pre class='rust trait'>")?;
     render_attributes(w, it)?;
-    write!(w, "{}{}trait {}{}{}",
+    write!(w, "{}{}{}trait {}{}{}",
            VisSpace(&it.visibility),
            UnsafetySpace(t.unsafety),
+           AutoSpace(t.auto),
            it.name.as_ref().unwrap(),
            t.generics,
            bounds)?;
@@ -2526,11 +2608,22 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
             ")?;
 
             for implementor in foreign {
+<<<<<<< HEAD
                 let assoc_link = AssocItemLink::GotoSource(
                     implementor.impl_item.def_id, &implementor.inner_impl().provided_trait_methods
                 );
                 render_impl(w, cx, &implementor, assoc_link,
                             RenderMode::Normal, implementor.impl_item.stable_since(), false)?;
+=======
+                if let Some(i) = implementor2item(&cache, implementor) {
+                    let impl_ = Impl { impl_item: i.clone() };
+                    let assoc_link = AssocItemLink::GotoSource(
+                        i.def_id, &implementor.inner_impl().provided_trait_methods
+                    );
+                    render_impl(w, cx, &impl_, assoc_link,
+                                RenderMode::Normal, i.stable_since(), false)?;
+                }
+>>>>>>> Generate documentation for auto-trait impls
             }
         }
 
@@ -2538,11 +2631,21 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
 
         for implementor in local {
             write!(w, "<li>")?;
+<<<<<<< HEAD
             if let Some(l) = (Item { cx, item: &implementor.impl_item }).src_href() {
                 write!(w, "<div class='out-of-band'>")?;
                 write!(w, "<a class='srclink' href='{}' title='{}'>[src]</a>",
                             l, "goto source code")?;
                 write!(w, "</div>")?;
+=======
+            if let Some(item) = implementor2item(&cache, implementor) {
+                if let Some(l) = (Item { cx, item: &item }).src_href() {
+                    write!(w, "<div class='out-of-band'>")?;
+                    write!(w, "<a class='srclink' href='{}' title='{}'>[src]</a>",
+                                l, "goto source code")?;
+                    write!(w, "</div>")?;
+                }
+>>>>>>> Generate documentation for auto-trait impls
             }
             write!(w, "<code>")?;
             // If there's already another implementor that has the same abbridged name, use the
@@ -3846,7 +3949,11 @@ fn sidebar_trait(fmt: &mut fmt::Formatter, it: &clean::Item,
     if let Some(implementors) = c.implementors.get(&it.def_id) {
         let res = implementors.iter()
                               .filter(|i| i.inner_impl().for_.def_id()
+<<<<<<< HEAD
                                            .map_or(false, |d| !c.paths.contains_key(&d)))
+=======
+                                                      .map_or(false, |d| !c.paths.contains_key(&d)))
+>>>>>>> Generate documentation for auto-trait impls
                               .filter_map(|i| {
                                   match extract_for_impl_name(&i.impl_item) {
                                       Some((ref name, ref url)) => {
@@ -3968,7 +4075,17 @@ fn sidebar_module(fmt: &mut fmt::Formatter, _it: &clean::Item,
                    ItemType::Function, ItemType::Typedef, ItemType::Union, ItemType::Impl,
                    ItemType::TyMethod, ItemType::Method, ItemType::StructField, ItemType::Variant,
                    ItemType::AssociatedType, ItemType::AssociatedConst, ItemType::ForeignType] {
+<<<<<<< HEAD
         if items.iter().any(|it| !it.is_stripped() && it.type_() == myty) {
+=======
+        if items.iter().any(|it| {
+            if it.is_auto_impl() {
+                false
+            } else {
+                !it.is_stripped() && it.type_() == myty
+            }
+        }) {
+>>>>>>> Generate documentation for auto-trait impls
             let (short, name) = match myty {
                 ItemType::ExternCrate |
                 ItemType::Import          => ("reexports", "Re-exports"),

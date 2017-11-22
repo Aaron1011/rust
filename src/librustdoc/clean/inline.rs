@@ -140,6 +140,7 @@ pub fn record_extern_fqn(cx: &DocContext, did: DefId, kind: clean::TypeKind) {
 }
 
 pub fn build_external_trait(cx: &DocContext, did: DefId) -> clean::Trait {
+    let auto_trait = cx.tcx.trait_def(did).has_auto_impl;
     let trait_items = cx.tcx.associated_items(did).map(|item| item.clean(cx)).collect();
     let predicates = cx.tcx.predicates_of(did);
     let generics = (cx.tcx.generics_of(did), &predicates).clean(cx);
@@ -147,6 +148,7 @@ pub fn build_external_trait(cx: &DocContext, did: DefId) -> clean::Trait {
     let (generics, supertrait_bounds) = separate_supertrait_bounds(generics);
     let is_spotlight = load_attrs(cx, did).has_doc_flag("spotlight");
     clean::Trait {
+        auto: auto_trait,
         unsafety: cx.tcx.trait_def(did).unsafety,
         generics,
         items: trait_items,
@@ -298,6 +300,32 @@ pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
         if !cx.access_levels.borrow().is_doc_reachable(traitref.def_id) {
             return
         }
+    }
+
+    // If this is an auto impl, then bail out early here
+    if tcx.is_auto_impl(did) {
+        return ret.push(clean::Item {
+            inner: clean::ImplItem(clean::Impl {
+                // FIXME: this should be decoded
+                unsafety: hir::Unsafety::Normal,
+                generics: Default::default(),
+                provided_trait_methods: FxHashSet(),
+                trait_: Some(match associated_trait.as_ref().unwrap().clean(cx) {
+                    clean::TraitBound(polyt, _) => polyt.trait_,
+                    clean::RegionBound(..) => unreachable!(),
+                }),
+                for_: clean::Type::DotDot,
+                items: Vec::new(),
+                polarity: None
+            }),
+            source: tcx.def_span(did).clean(cx),
+            name: None,
+            attrs,
+            visibility: Some(clean::Inherited),
+            stability: tcx.lookup_stability(did).clean(cx),
+            deprecation: tcx.lookup_deprecation(did).clean(cx),
+            def_id: did,
+        });
     }
 
     let for_ = tcx.type_of(did).clean(cx);

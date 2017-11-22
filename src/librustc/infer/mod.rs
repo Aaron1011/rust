@@ -109,10 +109,10 @@ pub struct InferCtxt<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     // `resolve_regions_and_report_errors` is invoked, this gets set
     // to `None` -- further attempts to perform unification etc may
     // fail if new region constraints would've been added.
-    region_constraints: RefCell<Option<RegionConstraintCollector<'tcx>>>,
+    pub region_constraints: RefCell<Option<RegionConstraintCollector<'tcx>>>,
 
     // Once region inference is done, the values for each variable.
-    lexical_region_resolutions: RefCell<Option<LexicalRegionResolutions<'tcx>>>,
+    pub lexical_region_resolutions: RefCell<Option<LexicalRegionResolutions<'tcx>>>,
 
     /// Caches the results of trait selection. This cache is used
     /// for things that have to do with the parameters in scope.
@@ -180,7 +180,7 @@ pub struct InferCtxt<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     // for each body-id in this map, which will process the
     // obligations within. This is expected to be done 'late enough'
     // that all type inference variables have been bound and so forth.
-    region_obligations: RefCell<Vec<(ast::NodeId, RegionObligation<'tcx>)>>,
+    pub region_obligations: RefCell<Vec<(ast::NodeId, RegionObligation<'tcx>)>>,
 }
 
 /// A map returned by `skolemize_late_bound_regions()` indicating the skolemized
@@ -1559,6 +1559,15 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         RefMut::map(
             self.region_constraints.borrow_mut(),
             |c| c.as_mut().expect("region constraints already solved"))
+    }
+
+    /// Clears the selection and evaluation caches, while
+    /// leaving all other caches untouched. This is useful when
+    /// repeatedly attemping to select an Obligation while chaning only
+    /// its ParamEnv.
+    pub fn clear_caches(&self) {
+        self.selection_cache.clear();
+        self.evaluation_cache.clear();
     }
 }
 
