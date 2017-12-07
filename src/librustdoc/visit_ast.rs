@@ -10,7 +10,6 @@
 
 //! Rust AST Visitor. Extracts useful information and massages it into a form
 //! usable for clean
-//!
 
 use std::mem;
 
@@ -29,10 +28,8 @@ use rustc::util::nodemap::FxHashSet;
 
 use rustc::hir;
 
-
 use core;
 use clean::{self, AttributesExt, NestedAttributesExt};
-use doctree;
 use doctree::*;
 
 // looks to me like the first two of these are actually
@@ -42,8 +39,6 @@ use doctree::*;
 
 // also, is there some reason that this doesn't use the 'visit'
 // framework from syntax?
-//
-//const DUMMY_DEF_ID: DefId = DefId { krate: INVALID_CRATE, index: DefIndex::from_u32(0) };
 
 pub struct RustdocVisitor<'a, 'tcx: 'a> {
     cstore: &'tcx CrateStore,
@@ -57,15 +52,12 @@ pub struct RustdocVisitor<'a, 'tcx: 'a> {
     reexported_macros: FxHashSet<DefId>,
 }
 
-
 impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
     pub fn new(cstore: &'tcx CrateStore,
                cx: &'a core::DocContext<'a, 'tcx>) -> RustdocVisitor<'a, 'tcx> {
         // If the root is re-exported, terminate all recursion.
         let mut stack = FxHashSet();
         stack.insert(ast::CRATE_NODE_ID);
-
-
         RustdocVisitor {
             module: Module::new(None),
             attrs: hir::HirVec::new(),
@@ -86,12 +78,6 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
     fn deprecation(&self, id: ast::NodeId) -> Option<attr::Deprecation> {
         self.cx.tcx.hir.opt_local_def_id(id)
             .and_then(|def_id| self.cx.tcx.lookup_deprecation(def_id))
-    }
-
-    fn is_auto_trait(&self, id: ast::NodeId) -> bool {
-        let auto = self.cx.tcx.trait_is_auto(self.cx.tcx.hir.local_def_id(id));
-        debug!("is_auto_trait(id: {}) = {}", id, auto);
-        auto
     }
 
     pub fn visit(&mut self, krate: &hir::Crate) {
@@ -154,7 +140,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
         debug!("Visiting enum");
         Enum {
             name,
-            variants: def.variants.iter().map(|v| doctree::Variant {
+            variants: def.variants.iter().map(|v| Variant {
                 name: v.node.name,
                 attrs: v.node.attrs.clone(),
                 stab: self.stability(v.node.data.id()),
@@ -456,15 +442,12 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                                                      m,
                                                      Some(name)));
             },
-            hir::ItemEnum(ref ed, ref gen) => {
-                om.enums.push(self.visit_enum_def(item, name, ed, gen));
-            },
-            hir::ItemStruct(ref sd, ref gen) => {
-                om.structs.push(self.visit_variant_data(item, name, sd, gen));
-            },
-            hir::ItemUnion(ref sd, ref gen) => {
-                om.unions.push(self.visit_union_data(item, name, sd, gen));
-            },
+            hir::ItemEnum(ref ed, ref gen) =>
+                om.enums.push(self.visit_enum_def(item, name, ed, gen)),
+            hir::ItemStruct(ref sd, ref gen) =>
+                om.structs.push(self.visit_variant_data(item, name, sd, gen)),
+            hir::ItemUnion(ref sd, ref gen) =>
+                om.unions.push(self.visit_union_data(item, name, sd, gen)),
             hir::ItemFn(ref fd, ref unsafety, constness, ref abi, ref gen, body) =>
                 om.fns.push(self.visit_fn(item, name, &**fd, unsafety,
                                           constness, abi, gen, body)),
@@ -516,9 +499,9 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                                     .map(|ti| self.cx.tcx.hir.trait_item(ti.id).clone())
                                     .collect();
                 let t = Trait {
-                    // We deliberately ignore the 'auto' field in ItemTrait, which
-                    // account for a legacy 'impl Trait for ..' 
-                    auto: self.is_auto_trait(item.id),
+                    // We deliberately ignore the 'auto' field in ItemTrait
+                    // as we want to allow  legacy 'impl Trait for ..' 
+                    auto: self.cx.tcx.trait_is_auto(self.cx.tcx.hir.local_def_id(item.id)),
                     unsafety,
                     name,
                     items,
@@ -589,4 +572,3 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
         }
     }
 }
-
