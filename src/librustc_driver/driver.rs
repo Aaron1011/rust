@@ -65,7 +65,6 @@ use derive_registrar;
 use pretty::ReplaceBodyWithLoop;
 
 use profile;
-use log;
 
 pub fn compile_input(trans: Box<TransCrate>,
                      sess: &Session,
@@ -506,8 +505,6 @@ pub fn phase_1_parse_input<'a>(control: &CompileController,
                                input: &Input)
                                -> PResult<'a, ast::Crate> {
     sess.diagnostic().set_continue_after_error(control.continue_parse_after_error);
-
-    eprintln!("Rustc driver log enabled: {:?} {:?}", log_enabled!(log::LogLevel::Error), log_enabled!(log::LogLevel::Debug));
 
     if sess.profile_queries() {
         profile::begin();

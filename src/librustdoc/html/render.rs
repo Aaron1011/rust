@@ -189,13 +189,6 @@ impl Implementor {
     }
 }
 
-/*/// Metadata about a legacy auto-imppl of a trait.
-pub struct AutoImplementor {
-    pub def_id: DefId,
-    pub stability: Option<clean::Stability>,
-    pub impl_: clean::AutoImpl
-}*/
-
 /// Metadata about implementations for a type.
 #[derive(Clone)]
 pub struct Impl {
@@ -296,12 +289,6 @@ pub struct Cache {
     /// implementors of the trait, and this mapping is exactly, that: a mapping
     /// of trait ids to the list of known implementors of the trait
     pub implementors: FxHashMap<DefId, Vec<Impl>>,
-
-    /*/// This map holds any legacy auto implementations
-    /// (i.e. 'impl Trait for ..') for a trait.
-    /// Once the legacy syntax is removed in favor of 'auto Trait {}',
-    /// this will no longer be needed
-    pub auto_implementors: FxHashMap<DefId, Vec<AutoImplementor>>,*/
 
     /// Cache of where external crate documentation can be found.
     pub extern_locations: FxHashMap<CrateNum, (String, PathBuf, ExternalLocation)>,
@@ -608,7 +595,6 @@ pub fn run(mut krate: clean::Crate,
         external_paths,
         paths: FxHashMap(),
         implementors: FxHashMap(),
-        //auto_implementors: FxHashMap(),
         stack: Vec::new(),
         parent_stack: Vec::new(),
         search_index: Vec::new(),
@@ -1235,22 +1221,6 @@ impl DocFolder for Cache {
                 }
             }
         }
-
-        // Collect all legacy auto implementations ('impl Trait for ..')
-        /*if let clean::AutoImpl(ref i) = item.inner {
-            if !self.masked_crates.contains(&item.def_id.krate) {
-                if let Some(did) = i.trait_.def_id() {
-                    if i.for_.def_id().map_or(true, |d| !self.masked_crates.contains(&d.krate)) {
-                        self.auto_implementors.entry(did).or_insert(vec![]).push(AutoImplementor {
-                            def_id: item.def_id,
-                            stability: item.stability.clone(),
-                            impl_: i.clone(),
-                        });
-                    }
-                }
-            }
-        }*/
-
 
         // Index this method for searching later on.
         if let Some(ref s) = item.name {

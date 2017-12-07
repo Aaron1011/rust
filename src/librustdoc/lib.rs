@@ -107,9 +107,6 @@ struct Output {
 pub fn main() {
     const STACK_SIZE: usize = 32_000_000; // 32MB
     env_logger::init().unwrap();
-
-    eprintln!("Rustdoc log enabled: {:?} {:?}", log_enabled!(log::LogLevel::Error), log_enabled!(log::LogLevel::Debug));
-
     let res = std::thread::Builder::new().stack_size(STACK_SIZE).spawn(move || {
         get_args().map(|args| main_args(&args)).unwrap_or(1)
     }).unwrap().join().unwrap_or(101);
