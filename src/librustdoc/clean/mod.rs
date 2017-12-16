@@ -3512,7 +3512,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             println!("Finished: '{:?}' '{:?}' '{:?}'", ty, result, last_env);
             let region_data = infcx.take_and_reset_region_constraints();
-            println!("Final infer ctx: {:?}", region_data);
+            //println!("Final infer ctx: {:?}", region_data);
 
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
             println!("New liftimes: {:?}", lifetime_predicates);
