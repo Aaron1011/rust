@@ -316,7 +316,8 @@ pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
                 }),
                 for_: clean::Type::DotDot,
                 items: Vec::new(),
-                polarity: None
+                polarity: None,
+                synthetic: false
             }),
             source: tcx.def_span(did).clean(cx),
             name: None,
@@ -376,6 +377,7 @@ pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
             generics: (tcx.generics_of(did), &predicates).clean(cx),
             items: trait_items,
             polarity: Some(polarity.clean(cx)),
+            synthetic: false // TODO - would we ever be inlinig synthetic impls?
         }),
         source: tcx.def_span(did).clean(cx),
         name: None,

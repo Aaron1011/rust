@@ -2884,6 +2884,7 @@ pub struct Impl {
     pub for_: Type,
     pub items: Vec<Item>,
     pub polarity: Option<ImplPolarity>,
+    pub synthetic: bool
 }
 
 fn get_auto_traits(cx: &DocContext, id: ast::NodeId) -> Vec<Item> {
@@ -2929,6 +2930,7 @@ impl Clean<Vec<Item>> for doctree::Impl {
                 for_: self.for_.clean(cx),
                 items,
                 polarity: Some(self.polarity.clean(cx)),
+                synthetic: false
             }),
         });
         ret
@@ -3014,7 +3016,8 @@ impl Clean<Item> for doctree::AutoImpl {
                 trait_: Some(self.trait_.clean(cx)),
                 for_: Type::DotDot,
                 items: Vec::new(),
-                polarity: None
+                polarity: None,
+                synthetic: false
             }),
         }
     }
@@ -3399,12 +3402,26 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 
     fn get_auto_trait_impl_for(&self, id: ast::NodeId, def_id: DefId, generics: hir::Generics, def_ctor: fn(DefId) -> Def, trait_def_id: DefId) -> Option<Item> {
-        let new_generics = self.find_auto_trait_generics(id, trait_def_id, &generics);
+        let result = self.find_auto_trait_generics(id, trait_def_id, &generics);
 
-        if new_generics.is_some() {
+        if result.is_auto() {
             let trait_ = hir::TraitRef {
                 path: get_path_for_type(self.cx.tcx, trait_def_id, hir::def::Def::Trait),
                 ref_id: ast::DUMMY_NODE_ID
+            };
+
+            let polarity;
+
+            let new_generics = match result {
+                AutoTraitResult::PositiveImpl(new_generics) => {
+                    polarity = None;
+                    new_generics
+                },
+                AutoTraitResult::NegativeImpl => {
+                    polarity = Some(ImplPolarity::Negative);
+                    generics.clean(self.cx)
+                },
+                _ => unreachable!()
             };
 
             let path = get_path_for_type(self.cx.tcx, def_id, def_ctor);
@@ -3436,12 +3453,13 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 deprecation: None,
                 inner: ImplItem(Impl {
                     unsafety: hir::Unsafety::Normal,
-                    generics: new_generics.unwrap(),
+                    generics: new_generics,
                     provided_trait_methods: FxHashSet(),
                     trait_: Some(trait_.clean(self.cx)),
                     for_: ty.clean(self.cx),
                     items: Vec::new(),
-                    polarity: None,
+                    polarity,
+                    synthetic: true
                 })
             })
         }
@@ -3473,7 +3491,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn find_auto_trait_generics(&self, id: ast::NodeId, trait_did: DefId, generics: &hir::Generics) -> Option<Generics> {
+    fn find_auto_trait_generics(&self, id: ast::NodeId, trait_did: DefId, generics: &hir::Generics) -> AutoTraitResult {
         let tcx = self.cx.tcx;
         let did = self.cx.tcx.hir.local_def_id(id);
         let ty = self.cx.tcx.type_of(did);
@@ -3490,12 +3508,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         let trait_pred = ty::Binder(trait_ref);
 
+        tcx.for_each_relevant_impl(trait_did, ty, |imp_def_id| println!("Possible impl: {:?}", imp_def_id));
+
         let bail_out = tcx.infer_ctxt().enter(|infcx| {
-            let mut selcx = SelectionContext::new(&infcx);
+            let mut selcx = SelectionContext::with_negative(&infcx, true);
             let result = selcx.select(&Obligation::new(ObligationCause::dummy(), orig_params, trait_pred.to_poly_trait_predicate()));
             match result {
                 Ok(Some(Vtable::VtableImpl(_))) => {
-                    println!("Manual impl for trait {:?} on ty {:?}. Bailing out", trait_did, ty);
+                    println!("Manual impl {:?} for trait {:?} on ty {:?}. Bailing out", result, trait_did, ty);
                     return true
                 },
                 _ => return false
@@ -3504,7 +3524,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         // If an explicit impl exists, it always takes priority over an auto impl
         if bail_out {
-            return None;
+            return AutoTraitResult::ExplicitImpl;
         }
 
 
@@ -3521,7 +3541,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             if result.err().is_some() {
                 println!("Ty {:?} cannot implement '{:?}' because '{:?}'", ty, trait_did, result.err().unwrap());
-                return None;
+                return AutoTraitResult::NegativeImpl
             }
 
             let names_map: FxHashMap<String, LifetimeDef> = generics.lifetimes().map(|l|  {
@@ -3587,7 +3607,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             let new_generics = self.param_env_to_generics(ty, last_env, generics.clone(), lifetime_predicates);
             println!("Ty {:?} has new generics: '{:?}'", ty, new_generics);
-            return Some(new_generics);
+            return AutoTraitResult::PositiveImpl(new_generics);
 
         });
 
@@ -4083,6 +4103,28 @@ struct RegionDeps<'tcx> {
 enum SimpleBound {
     RegionBound(Lifetime),
     TraitBound(Vec<PathSegment>, Vec<SimpleBound>, Vec<GenericParam>, hir::TraitBoundModifier)
+}
+
+enum AutoTraitResult {
+    ExplicitImpl,
+
+    PositiveImpl(Generics),
+
+    NegativeImpl,
+}
+
+impl AutoTraitResult {
+
+    fn is_explicit(&self) -> bool {
+        !self.is_auto()
+    }
+
+    fn is_auto(&self) -> bool {
+        match *self {
+            AutoTraitResult::PositiveImpl(_) | AutoTraitResult::NegativeImpl => true,
+            _ => false
+        }
+    }
 }
 
 impl From<TyParamBound> for SimpleBound {
