@@ -1555,7 +1555,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         InferOk { value, obligations }
     }
 
-    fn borrow_region_constraints(&self) -> RefMut<'_, RegionConstraintCollector<'tcx>> {
+    pub fn borrow_region_constraints(&self) -> RefMut<'_, RegionConstraintCollector<'tcx>> {
         RefMut::map(
             self.region_constraints.borrow_mut(),
             |c| c.as_mut().expect("region constraints already solved"))

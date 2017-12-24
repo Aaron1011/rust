@@ -106,6 +106,7 @@ pub fn run_core(search_paths: SearchPaths,
                 triple: Option<String>,
                 maybe_sysroot: Option<PathBuf>,
                 allow_warnings: bool,
+                crate_name: Option<String>,
                 force_unstable_if_unmarked: bool) -> (clean::Crate, RenderInfo)
 {
     // Parse, resolve, and typecheck the given crate.
@@ -203,6 +204,16 @@ pub fn run_core(search_paths: SearchPaths,
                                   .collect()
         };
 
+        let send_trait;
+        
+        if crate_name == Some("core".to_string()) {
+            send_trait = clean::get_trait_def_id(&tcx, &["marker", "Send"], true);
+        } else {
+            send_trait = clean::get_trait_def_id(&tcx, &["core", "marker", "Send"], false)
+        }
+
+        println!("Send trait: {:?}", send_trait);
+
         let ctxt = DocContext {
             tcx,
             populated_all_crate_impls: Cell::new(false),
@@ -211,7 +222,7 @@ pub fn run_core(search_paths: SearchPaths,
             renderinfo: Default::default(),
             ty_substs: Default::default(),
             lt_substs: Default::default(),
-            send_trait: clean::get_trait_def_id(&tcx, &["core", "marker", "Send"]),
+            send_trait: send_trait,
             fake_def_id: Cell::new(DefId {
                 krate: LOCAL_CRATE,
                 index: tcx.hir.definitions().def_path_table().next_id(DefIndexAddressSpace::Low)

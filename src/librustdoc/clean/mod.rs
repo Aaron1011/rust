@@ -10,6 +10,7 @@
 
 //! This module contains the "cleaned" pieces of the AST, and the functions
 //! that clean them.
+#![allow(warnings)]
 
 pub use self::Type::*;
 pub use self::Mutability::*;
@@ -29,6 +30,7 @@ use syntax_pos::{self, DUMMY_SP, Pos, FileName};
 
 use rustc::middle::const_val::ConstVal;
 use rustc::middle::privacy::AccessLevels;
+use rustc::middle::region;
 use rustc::middle::resolve_lifetime as rl;
 use rustc::middle::lang_items;
 use rustc::hir::{self, LifetimeDef, LifetimeName, HirVec};
@@ -41,7 +43,8 @@ use rustc::middle::stability;
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
 use rustc::traits;
-use rustc::infer::InferCtxt;
+use rustc::infer::{InferCtxt, SubregionOrigin};
+use rustc::infer::outlives::env::OutlivesEnvironment;
 use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
@@ -193,6 +196,11 @@ impl<'a, 'tcx> Clean<Crate> for visit_ast::RustdocVisitor<'a, 'tcx> {
                 }
             }));
         }
+
+        match module.inner {
+            ModuleItem(ref mod_) => println!("Inner: {:?}", mod_.items.iter().flat_map(|ref i| &i.name).collect::<Vec<_>>()),
+            _ => {}
+        };
 
         let mut access_levels = cx.access_levels.borrow_mut();
         let mut external_traits = cx.external_traits.borrow_mut();
@@ -1200,6 +1208,21 @@ impl<'tcx> Clean<Type> for ty::ProjectionTy<'tcx> {
             name: cx.tcx.associated_item(self.item_def_id).name.clean(cx),
             self_type: box self.self_ty().clean(cx),
             trait_: box trait_
+        }
+    }
+}
+
+#[derive(Clone, RustcEncodable, RustcDecodable, PartialEq, Eq, Debug, Hash)]
+pub enum GenericParam {
+    Lifetime(Lifetime),
+    Type(TyParam),
+}
+
+impl Clean<GenericParam> for hir::GenericParam {
+    fn clean(&self, cx: &DocContext) -> GenericParam {
+        match *self {
+            hir::GenericParam::Lifetime(ref l) => GenericParam::Lifetime(l.clean(cx)),
+            hir::GenericParam::Type(ref t) => GenericParam::Type(t.clean(cx)),
         }
     }
 }
@@ -3426,8 +3449,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 
     fn generics_to_path_params(&self, generics: hir::Generics) -> hir::PathParameters {
-        let lifetimes = HirVec::from_vec(generics.lifetimes.iter().map(|l| l.lifetime).collect());
-        let types = HirVec::from_vec(generics.ty_params.iter().map(|p| P(self.ty_param_to_ty(p.clone()))).collect());
+        let lifetimes = HirVec::from_vec(generics.lifetimes().map(|l| l.lifetime).collect());
+        let types = HirVec::from_vec(generics.ty_params().map(|p| P(self.ty_param_to_ty(p.clone()))).collect());
 
         hir::PathParameters {
             lifetimes: lifetimes,
@@ -3501,24 +3524,69 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 return None;
             }
 
-            let names_map: FxHashMap<String, LifetimeDef> = generics.clone().lifetimes.into_iter().map(|l|  {
+            let names_map: FxHashMap<String, LifetimeDef> = generics.lifetimes().map(|l|  {
                 (match l.lifetime.name {
                     LifetimeName::Name(n) => n.as_str().to_string(),
                     _ => panic!("Unexpected lifetime for type '{:?}': '{:?}'", ty, l)
-                }, l)
+                }, l.clone())
             }).collect();
 
 
 
             println!("Finished: '{:?}' '{:?}' '{:?}'", ty, result, last_env);
-            let region_data = infcx.take_and_reset_region_constraints();
+
+
+            let body_ids: FxHashSet<_> = infcx.region_obligations.borrow().iter().map(|&(id, _)| id).collect();
+
+            for id in body_ids {
+                infcx.process_registered_region_obligations(&[], None, last_env.clone(), id);
+            }
+
+            let region_data = infcx.borrow_region_constraints().region_constraint_data().clone();
+                //println!("Region data new constrains: {:?}", region_data.constraints);
+                //println!("Region data verifies: {:?}", region_data.verifys);
+            println!("Can borrow: {:?}", infcx.region_constraints.try_borrow_mut().err());
+            //drop(constraint);
+            //let region_data = infcx.region_constraints.borrow().as_ref().unwrap().region_constraint_data().clone();
+
+
+            infcx.resolve_regions_and_report_errors(trait_did, &Default::default(), &OutlivesEnvironment::new(last_env));
+            println!("Lexical resolutions: {:?}", infcx.lexical_region_resolutions.borrow());
+
+            let unsolved = infcx.region_obligations.borrow().clone();
+            if !unsolved.is_empty() {
+                panic!("Unsolved: {:?}", unsolved);
+            }
+
+            //let new_data = infcx.take_and_reset_region_constraints();
+
+            //infcx.resolve_regions_and_report_errors(
+
+            /*let unsolved_constraints: Vec<_> = unsolved.into_iter().map(|o| {
+                ty::Predicate::TypeOutlives(ty::Binder(ty::OutlivesPredicate(o.1.sup_type, o.1.sub_region)))
+            }).collect();*/
+
+            /*let new_preds: Vec<_> = last_env.caller_bounds.into_iter().map(|p| p.clone()).chain(unsolved_constraints.into_iter()).collect();
+
+            println!("New preds: {:?}", new_preds);
+
+            let new_param_env = ty::ParamEnv {
+                caller_bounds: tcx.intern_predicates(&tcx.lift_to_global(&new_preds).unwrap()),
+                reveal: last_env.reveal
+            };*/
+
+            //println!("New params: {:?}", new_param_env);
+
+            //let region_data = infcx.take_and_reset_region_constraints();
+            println!("Solved constraints: {:?}", region_data.constraints);
+            println!("Verifies: {:?}", region_data.verifys);
             //println!("Final infer ctx: {:?}", region_data);
 
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
             println!("New liftimes: {:?}", lifetime_predicates);
 
             let new_generics = self.param_env_to_generics(ty, last_env, generics.clone(), lifetime_predicates);
-            //println!("Ty {:?} has new generics: '{:?}'", ty, new_generics);
+            println!("Ty {:?} has new generics: '{:?}'", ty, new_generics);
             return Some(new_generics);
 
         });
@@ -3774,7 +3842,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             match p { &Predicate::TypeOutlives(ref pred) => Some(pred), _ => None  }
         }).collect();
 
-        let ty_params: Vec<TyParam> = type_generics.ty_params.iter().map(|t| t.clean(self.cx)).collect();
+        let ty_params: Vec<TyParam> = type_generics.ty_params().map(|t| t.clean(self.cx)).collect();
 
         let mut bounds_map = FxHashMap();
         for p in ty_params.iter() {
@@ -3844,7 +3912,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         did: self.next_def_id(),
                         is_generic: false
                     },
-                    lifetimes: Vec::new()
+                    generic_params: Vec::new()
                 }, hir::TraitBoundModifier::None));
             }
 
@@ -3865,12 +3933,13 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             Some(where_predicate)
         }).collect();
 
-        where_predicates.extend(lifetime_predicates);
+        let Generics { params: generic_params, where_predicates: mut generic_where_predicates } = type_generics.clean(self.cx);
+
+        generic_where_predicates.extend(lifetime_predicates);
 
         Generics {
-            lifetimes: type_generics.lifetimes.clean(self.cx),
-            type_params: ty_params,
-            where_predicates: where_predicates
+            params: generic_params,
+            where_predicates: generic_where_predicates
         }
     }
 
@@ -3887,26 +3956,51 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
 // Start of code copied from rust-clippy
 
-pub fn get_trait_def_id(tcx: &TyCtxt, path: &[&str]) -> Option<DefId> {
-    let def = match path_to_def(tcx, path) {
-        Some(def) => def,
-        None => return None,
+pub fn get_trait_def_id(tcx: &TyCtxt, path: &[&str], use_local: bool) -> Option<DefId> {
+    return if use_local {
+        path_to_def_local(tcx, path)
+    } else {
+        path_to_def(tcx, path)
     };
-
-    match def {
-        def::Def::Trait(trait_id) => Some(trait_id),
-        _ => None,
-    }
 }
 
-pub fn path_to_def(tcx: &TyCtxt, path: &[&str]) -> Option<def::Def> {
+pub fn path_to_def_local(tcx: &TyCtxt, path: &[&str]) -> Option<DefId> {
+    let krate = tcx.hir.krate();
+    let mut items = krate.module.item_ids.clone();
+    let mut path_it = path.iter().peekable();
+
+    loop {
+        let segment = match path_it.next() {
+            Some(segment) => segment,
+            None => return None,
+        };
+
+        for item_id in mem::replace(&mut items, HirVec::new()).iter() {
+            let item = tcx.hir.expect_item(item_id.id);
+            if item.name == *segment {
+                if path_it.peek().is_none() {
+                    return Some(tcx.hir.local_def_id(item_id.id))
+                }
+
+                items = match &item.node {
+                    &hir::ItemMod(ref m) => m.item_ids.clone(),
+                    _ => panic!("Unexpected item {:?} in path {:?} path")
+                };
+                break;
+            }
+        }
+    }
+
+}
+
+pub fn path_to_def(tcx: &TyCtxt, path: &[&str]) -> Option<DefId> {
     let crates = tcx.crates();
-    println!("Crates: {:?}", crates);
+
 
     let krate = crates
         .iter()
-        .chain(iter::once(&LOCAL_CRATE))
         .find(|&&krate| tcx.crate_name(krate) == path[0]);
+
     if let Some(krate) = krate {
         let krate = DefId {
             krate: *krate,
@@ -3924,7 +4018,10 @@ pub fn path_to_def(tcx: &TyCtxt, path: &[&str]) -> Option<def::Def> {
             for item in mem::replace(&mut items, Rc::new(vec![])).iter() {
                 if item.ident.name == *segment {
                     if path_it.peek().is_none() {
-                        return Some(item.def);
+                        return match item.def {
+                            def::Def::Trait(did) => Some(did),
+                            _ => None
+                        }
                     }
 
                     items = tcx.item_children(item.def.def_id());
@@ -3985,7 +4082,7 @@ struct RegionDeps<'tcx> {
 #[derive(Eq, PartialEq, Hash, Debug)]
 enum SimpleBound {
     RegionBound(Lifetime),
-    TraitBound(Vec<PathSegment>, Vec<SimpleBound>, Vec<Lifetime>, hir::TraitBoundModifier)
+    TraitBound(Vec<PathSegment>, Vec<SimpleBound>, Vec<GenericParam>, hir::TraitBoundModifier)
 }
 
 impl From<TyParamBound> for SimpleBound {
@@ -3995,7 +4092,7 @@ impl From<TyParamBound> for SimpleBound {
             TyParamBound::RegionBound(l) => SimpleBound::RegionBound(l),
             TyParamBound::TraitBound(t, mod_) => match t.trait_ {
                 Type::ResolvedPath { path, typarams, .. } => {
-                    SimpleBound::TraitBound(path.segments, typarams.map_or_else(|| Vec::new(), |v| v.iter().map(|p| SimpleBound::from(p.clone())).collect()), t.lifetimes, mod_)
+                    SimpleBound::TraitBound(path.segments, typarams.map_or_else(|| Vec::new(), |v| v.iter().map(|p| SimpleBound::from(p.clone())).collect()), t.generic_params, mod_)
                 },
                 _ => panic!("Unexpected bound {:?}", bound)
             }

@@ -517,7 +517,7 @@ where R: 'static + Send, F: 'static + Send + FnOnce(Output) -> R {
 
         let (mut krate, renderinfo) =
             core::run_core(paths, cfgs, externs, Input::File(cratefile), triple, maybe_sysroot,
-                           display_warnings, force_unstable_if_unmarked);
+                           display_warnings, crate_name.clone(), force_unstable_if_unmarked);
 
         info!("finished with rustc");
 
