@@ -197,10 +197,10 @@ impl<'a, 'tcx> Clean<Crate> for visit_ast::RustdocVisitor<'a, 'tcx> {
             }));
         }
 
-        match module.inner {
+        /*match module.inner {
             ModuleItem(ref mod_) => println!("Inner: {:?}", mod_.items.iter().flat_map(|ref i| &i.name).collect::<Vec<_>>()),
             _ => {}
-        };
+        };*/
 
         let mut access_levels = cx.access_levels.borrow_mut();
         let mut external_traits = cx.external_traits.borrow_mut();
@@ -2419,7 +2419,7 @@ pub struct Union {
 
 impl Clean<Vec<Item>> for doctree::Struct {
     fn clean(&self, cx: &DocContext) -> Vec<Item> {
-        let mut ret = get_auto_traits(cx, self.id);
+        let mut ret = get_auto_traits_with_node_id(cx, self.id);
 
         ret.push(Item {
             name: Some(self.name.clean(cx)),
@@ -2443,7 +2443,7 @@ impl Clean<Vec<Item>> for doctree::Struct {
 
 impl Clean<Vec<Item>> for doctree::Union {
     fn clean(&self, cx: &DocContext) -> Vec<Item> {
-        let mut ret = get_auto_traits(cx, self.id);
+        let mut ret = get_auto_traits_with_node_id(cx, self.id);
 
         ret.push(Item {
             name: Some(self.name.clean(cx)),
@@ -2494,7 +2494,7 @@ pub struct Enum {
 
 impl Clean<Vec<Item>> for doctree::Enum {
     fn clean(&self, cx: &DocContext) -> Vec<Item> {
-        let mut ret = get_auto_traits(cx, self.id);
+        let mut ret = get_auto_traits_with_node_id(cx, self.id);
 
         ret.push(Item {
             name: Some(self.name.clean(cx)),
@@ -2887,12 +2887,17 @@ pub struct Impl {
     pub synthetic: bool
 }
 
-fn get_auto_traits(cx: &DocContext, id: ast::NodeId) -> Vec<Item> {
+pub fn get_auto_traits_with_node_id(cx: &DocContext, id: ast::NodeId) -> Vec<Item> {
+    let finder = AutoTraitFinder { cx };
+    finder.get_with_node_id(id)
+}
+
+pub fn get_auto_traits_with_def_id(cx: &DocContext, id: DefId) -> Vec<Item> {
     let finder = AutoTraitFinder {
         cx,
     };
 
-    finder.get_auto_trait_impls(id)
+    finder.get_with_def_id(id)
 }
 
 impl Clean<Vec<Item>> for doctree::Impl {
@@ -2951,7 +2956,7 @@ fn build_deref_target_impls(cx: &DocContext,
         let primitive = match *target {
             ResolvedPath { did, .. } if did.is_local() => continue,
             ResolvedPath { did, .. } => {
-                ret.extend(inline::build_impls(cx, did));
+                ret.extend(inline::build_impls(cx, did, true));
                 continue
             }
             _ => match target.primitive_type() {
@@ -3376,33 +3381,57 @@ struct AutoTraitFinder<'a, 'tcx: 'a> {
 
 impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
-    pub fn get_auto_trait_impls(&self, id: ast::NodeId) -> Vec<Item> {
-        let item = self.cx.tcx.hir.expect_item(id);
-        let def_id = self.cx.tcx.hir.local_def_id(id);
+    pub fn get_with_def_id(&self, def_id: DefId) -> Vec<Item> {
         let ty = self.cx.tcx.type_of(def_id);
-        let tcx = self.cx.tcx;
 
-        let (def_ctor, generics): (fn(DefId) -> Def, hir::Generics) = match item.node {
-            hir::ItemEnum(_, ref generics) => (Def::Enum, generics.clone()),
-            hir::ItemStruct(_, ref generics) => (Def::Struct, generics.clone()),
-            hir::ItemUnion(_, ref generics) => (Def::Union, generics.clone()),
+        let def_ctor: fn(DefId) -> Def = match ty.sty {
+            ty::TyAdt(adt, _) => {
+                match adt.adt_kind() {
+                    AdtKind::Struct => Def::Struct,
+                    AdtKind::Enum => Def::Enum,
+                    AdtKind::Union => Def::Union
+                }
+            }
+            _ => panic!("Unexpected type {:?}", def_id)
+        };
+
+        self.get_auto_trait_impls(def_id, def_ctor)
+    }
+
+    pub fn get_with_node_id(&self, id: ast::NodeId) -> Vec<Item> {
+        let item = &self.cx.tcx.hir.expect_item(id).node;
+
+        let def_ctor = match *item {
+            hir::ItemStruct(_, _) => Def::Struct,
+            hir::ItemUnion(_, _) => Def::Union,
+            hir::ItemEnum(_, _) => Def::Enum,
             _ => panic!("Unexpected type {:?} {:?}", item, id)
         };
 
-        println!("Get auto traits for type '{:?}' with initial generics '{:?}'", ty, generics);
+        self.get_auto_trait_impls(self.cx.tcx.hir.local_def_id(id), def_ctor)
+    }
 
-        let auto_traits: Vec<_> = self.cx.send_trait.and_then(|send_trait| self.get_auto_trait_impl_for(id, def_id, generics.clone(), def_ctor, send_trait)).into_iter()
-              .chain(self.get_auto_trait_impl_for(id, def_id, generics.clone(), def_ctor, tcx.require_lang_item(lang_items::SyncTraitLangItem)).into_iter())
+    pub fn get_auto_trait_impls(&self, def_id: DefId, def_ctor: fn(DefId) -> Def) -> Vec<Item> {
+        //let item = self.cx.tcx.hir.expect_item(id);
+        //let def_id = self.cx.tcx.hir.local_def_id(id);
+        let tcx = self.cx.tcx;
+        let generics = self.cx.tcx.generics_of(def_id);
+
+
+        println!("Get auto traits for type '{:?}' with initial generics '{:?}'", def_id, generics);
+
+        let auto_traits: Vec<_> = self.cx.send_trait.and_then(|send_trait| self.get_auto_trait_impl_for(def_id, generics.clone(), def_ctor, send_trait)).into_iter()
+              .chain(self.get_auto_trait_impl_for(def_id, generics.clone(), def_ctor, tcx.require_lang_item(lang_items::SyncTraitLangItem)).into_iter())
               //.chain(self.get_auto_trait_impl_for(item.id, def_id, generics.clone(), def_ctor, tcx.require_lang_item(lang_items::SizedTraitLangItem)).into_iter())
               .collect();
 
         
-        debug!("get_auto_traits: type {:?} auto_traits {:?}", ty, auto_traits);
+        debug!("get_auto_traits: type {:?} auto_traits {:?}", def_id, auto_traits);
         auto_traits
     }
 
-    fn get_auto_trait_impl_for(&self, id: ast::NodeId, def_id: DefId, generics: hir::Generics, def_ctor: fn(DefId) -> Def, trait_def_id: DefId) -> Option<Item> {
-        let result = self.find_auto_trait_generics(id, trait_def_id, &generics);
+    fn get_auto_trait_impl_for(&self, def_id: DefId, generics: ty::Generics, def_ctor: fn(DefId) -> Def, trait_def_id: DefId) -> Option<Item> {
+        let result = self.find_auto_trait_generics(def_id, trait_def_id, &generics);
 
         if result.is_auto() {
             let trait_ = hir::TraitRef {
@@ -3419,7 +3448,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 },
                 AutoTraitResult::NegativeImpl => {
                     polarity = Some(ImplPolarity::Negative);
-                    generics.clean(self.cx)
+
+                    let real_generics = (&generics, &self.cx.tcx.predicates_of(def_id));
+                    real_generics.clean(self.cx)
                 },
                 _ => unreachable!()
             };
@@ -3466,9 +3497,21 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         None
     }
 
-    fn generics_to_path_params(&self, generics: hir::Generics) -> hir::PathParameters {
-        let lifetimes = HirVec::from_vec(generics.lifetimes().map(|l| l.lifetime).collect());
-        let types = HirVec::from_vec(generics.ty_params().map(|p| P(self.ty_param_to_ty(p.clone()))).collect());
+    fn generics_to_path_params(&self, generics: ty::Generics) -> hir::PathParameters {
+        let lifetimes = HirVec::from_vec(generics.regions.iter().map(|p| {
+            let name = if p.name == "" {
+                hir::LifetimeName::Static
+            } else {
+                hir::LifetimeName::Name(p.name)
+            };
+
+            hir::Lifetime {
+                id: ast::DUMMY_NODE_ID,
+                span: DUMMY_SP,
+                name
+            }
+        }).collect());
+        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.name))).collect());
 
         hir::PathParameters {
             lifetimes: lifetimes,
@@ -3478,22 +3521,21 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn ty_param_to_ty(&self, param: hir::TyParam) -> hir::Ty {
+    fn ty_param_to_ty(&self, name: ast::Name) -> hir::Ty {
         hir::Ty {
             id: ast::DUMMY_NODE_ID,
             node: hir::Ty_::TyPath(hir::QPath::Resolved(None, P(hir::Path {
                 span: DUMMY_SP,
                 def: Def::TyParam(self.next_def_id()),
-                segments: HirVec::from_vec(vec![hir::PathSegment::from_name(param.name)])
+                segments: HirVec::from_vec(vec![hir::PathSegment::from_name(name)])
             }))),
             span: DUMMY_SP,
             hir_id: hir::DUMMY_HIR_ID
         }
     }
 
-    fn find_auto_trait_generics(&self, id: ast::NodeId, trait_did: DefId, generics: &hir::Generics) -> AutoTraitResult {
+    fn find_auto_trait_generics(&self, did: DefId, trait_did: DefId, generics: &ty::Generics) -> AutoTraitResult {
         let tcx = self.cx.tcx;
-        let did = self.cx.tcx.hir.local_def_id(id);
         let ty = self.cx.tcx.type_of(did);
 
         let orig_params = tcx.param_env(did);
@@ -3507,8 +3549,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         };
 
         let trait_pred = ty::Binder(trait_ref);
-
-        tcx.for_each_relevant_impl(trait_did, ty, |imp_def_id| println!("Possible impl: {:?}", imp_def_id));
 
         let bail_out = tcx.infer_ctxt().enter(|infcx| {
             let mut selcx = SelectionContext::with_negative(&infcx, true);
@@ -3544,11 +3584,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 return AutoTraitResult::NegativeImpl
             }
 
-            let names_map: FxHashMap<String, LifetimeDef> = generics.lifetimes().map(|l|  {
-                (match l.lifetime.name {
-                    LifetimeName::Name(n) => n.as_str().to_string(),
-                    _ => panic!("Unexpected lifetime for type '{:?}': '{:?}'", ty, l)
-                }, l.clone())
+            let names_map: FxHashMap<String, Lifetime> = generics.regions.iter().map(|l|  {
+                    (l.name.as_str().to_string(), l.clean(self.cx))
             }).collect();
 
 
@@ -3571,7 +3608,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
 
             infcx.resolve_regions_and_report_errors(trait_did, &Default::default(), &OutlivesEnvironment::new(last_env));
-            println!("Lexical resolutions: {:?}", infcx.lexical_region_resolutions.borrow());
+            //println!("Lexical resolutions: {:?}", infcx.lexical_region_resolutions.borrow());
 
             let unsolved = infcx.region_obligations.borrow().clone();
             if !unsolved.is_empty() {
@@ -3605,7 +3642,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
             println!("New liftimes: {:?}", lifetime_predicates);
 
-            let new_generics = self.param_env_to_generics(ty, last_env, generics.clone(), lifetime_predicates);
+            let new_generics = self.param_env_to_generics(ty, did, last_env, generics.clone(), lifetime_predicates);
             println!("Ty {:?} has new generics: '{:?}'", ty, new_generics);
             return AutoTraitResult::PositiveImpl(new_generics);
 
@@ -3724,9 +3761,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         return params;
     }
 
-    fn get_lifetime(&self, region: Region, names_map: &FxHashMap<String, LifetimeDef>) -> hir::Lifetime {
+    fn get_lifetime(&self, region: Region, names_map: &FxHashMap<String, Lifetime>) -> Lifetime {
         self.region_name(region).map(|name| names_map.get(&name).unwrap_or_else(|| panic!("Missing lifetime with name {:?} for {:?}", name, region)))
-                           .map_or(STATIC_LIFETIME, |l| l.lifetime)
+                           .unwrap_or(&Lifetime::statik()).clone()
     }
 
     fn region_name(&self, region: Region) -> Option<String> {
@@ -3738,7 +3775,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn handle_lifetimes(&self, regions: &RegionConstraintData, names_map: &FxHashMap<String, LifetimeDef>) -> Vec<WherePredicate> {
+    fn handle_lifetimes(&self, regions: &RegionConstraintData, names_map: &FxHashMap<String, Lifetime>) -> Vec<WherePredicate> {
         // Our goal is to 'flatten' the list of constraints by eliminating
         // all intermediate RegionVids. At the end, all constraints should
         // be between Regions (aka region variables). This gives us the information
@@ -3838,14 +3875,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let lifetime_predicates = names_map.iter().flat_map(|(name, lifetime)| {
             let empty = Vec::new();
             let bounds: FxHashSet<Lifetime> = finished_map.get(name).unwrap_or(&empty).iter().map(|region| {
-                self.get_lifetime(region, names_map).clean(self.cx)
+                self.get_lifetime(region, names_map)
             }).collect();
 
             if bounds.is_empty() {
                 return None
             }
             Some(WherePredicate::RegionPredicate {
-                lifetime: lifetime.lifetime.clean(self.cx),
+                lifetime: lifetime.clone(),
                 bounds: bounds.into_iter().collect()
             })
         }).collect();
@@ -3853,7 +3890,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         lifetime_predicates
     }
 
-    fn param_env_to_generics(&self, ty: ty::Ty, param_env: ty::ParamEnv, type_generics: hir::Generics, lifetime_predicates: Vec<WherePredicate>) -> Generics {
+    fn param_env_to_generics(&self, ty: ty::Ty, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, lifetime_predicates: Vec<WherePredicate>) -> Generics {
         let trait_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
             match p { &Predicate::Trait(ref pred) => Some(pred), _ => None  }
         }).collect();
@@ -3862,7 +3899,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             match p { &Predicate::TypeOutlives(ref pred) => Some(pred), _ => None  }
         }).collect();
 
-        let ty_params: Vec<TyParam> = type_generics.ty_params().map(|t| t.clean(self.cx)).collect();
+        let ty_params: Vec<TyParam> = type_generics.types.iter().map(|t| t.clean(self.cx)).collect();
 
         let mut bounds_map = FxHashMap();
         for p in ty_params.iter() {
@@ -3953,7 +3990,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             Some(where_predicate)
         }).collect();
 
-        let Generics { params: generic_params, where_predicates: mut generic_where_predicates } = type_generics.clean(self.cx);
+        let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
+
+        let Generics { params: generic_params, where_predicates: mut generic_where_predicates } = full_generics.clean(self.cx);
 
         generic_where_predicates.extend(lifetime_predicates);
 

@@ -25,7 +25,7 @@ use rustc::util::nodemap::FxHashSet;
 
 use core::{DocContext, DocAccessLevels};
 use doctree;
-use clean::{self, GetDefId};
+use clean::{self, GetDefId, get_auto_traits_with_def_id};
 
 use super::Clean;
 
@@ -50,7 +50,7 @@ pub fn try_inline(cx: &DocContext, def: Def, name: ast::Name)
     let inner = match def {
         Def::Trait(did) => {
             record_extern_fqn(cx, did, clean::TypeKind::Trait);
-            ret.extend(build_impls(cx, did));
+            ret.extend(build_impls(cx, did, false));
             clean::TraitItem(build_external_trait(cx, did))
         }
         Def::Fn(did) => {
@@ -59,27 +59,27 @@ pub fn try_inline(cx: &DocContext, def: Def, name: ast::Name)
         }
         Def::Struct(did) => {
             record_extern_fqn(cx, did, clean::TypeKind::Struct);
-            ret.extend(build_impls(cx, did));
+            ret.extend(build_impls(cx, did, true));
             clean::StructItem(build_struct(cx, did))
         }
         Def::Union(did) => {
             record_extern_fqn(cx, did, clean::TypeKind::Union);
-            ret.extend(build_impls(cx, did));
+            ret.extend(build_impls(cx, did, true));
             clean::UnionItem(build_union(cx, did))
         }
         Def::TyAlias(did) => {
             record_extern_fqn(cx, did, clean::TypeKind::Typedef);
-            ret.extend(build_impls(cx, did));
+            ret.extend(build_impls(cx, did, true));
             clean::TypedefItem(build_type_alias(cx, did), false)
         }
         Def::Enum(did) => {
             record_extern_fqn(cx, did, clean::TypeKind::Enum);
-            ret.extend(build_impls(cx, did));
+            ret.extend(build_impls(cx, did, true));
             clean::EnumItem(build_enum(cx, did))
         }
         Def::TyForeign(did) => {
             record_extern_fqn(cx, did, clean::TypeKind::Foreign);
-            ret.extend(build_impls(cx, did));
+            ret.extend(build_impls(cx, did, false));
             clean::ForeignTypeItem
         }
         // Never inline enum variants but leave them shown as re-exports.
@@ -223,12 +223,19 @@ fn build_type_alias(cx: &DocContext, did: DefId) -> clean::Typedef {
     }
 }
 
-pub fn build_impls(cx: &DocContext, did: DefId) -> Vec<clean::Item> {
+pub fn build_impls(cx: &DocContext, did: DefId, auto_traits: bool) -> Vec<clean::Item> {
     let tcx = cx.tcx;
     let mut impls = Vec::new();
 
     for &did in tcx.inherent_impls(did).iter() {
         build_impl(cx, did, &mut impls);
+    }
+
+    if auto_traits {
+        println!("Inlining impls for {:?}", did);
+        let auto_impls = get_auto_traits_with_def_id(cx, did);
+        println!("Inlined auto impls {:?} {:?}", auto_impls.len(), did);
+        impls.extend(auto_impls);
     }
 
     // If this is the first time we've inlined something from another crate, then
@@ -244,6 +251,7 @@ pub fn build_impls(cx: &DocContext, did: DefId) -> Vec<clean::Item> {
     }
 
     cx.populated_all_crate_impls.set(true);
+
 
     for &cnum in tcx.crates().iter() {
         for did in tcx.all_trait_implementations(cnum).iter() {

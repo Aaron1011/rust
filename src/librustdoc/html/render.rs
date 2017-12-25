@@ -550,7 +550,6 @@ pub fn run(mut krate: clean::Crate,
         sort_modules_alphabetically,
     };
 
-    println!("Crate name and start of render: {:?}", krate.name);
 
     // If user passed in `--playground-url` arg, we fill in crate name here
     if let Some(url) = playground_url {
@@ -1505,7 +1504,6 @@ impl Context {
     /// This currently isn't parallelized, but it'd be pretty easy to add
     /// parallelization to this function.
     fn krate(self, mut krate: clean::Crate) -> Result<(), Error> {
-        println!("Rendering krate: {:?}", krate);
         let mut item = match krate.module.take() {
             Some(i) => i,
             None => return Ok(()),
@@ -1605,7 +1603,6 @@ impl Context {
         }
 
         if item.is_mod() {
-            println!("Recursing with item: {:?}", item);
             // modules are special because they add a namespace. We also need to
             // recurse into the items of the module as well.
             let name = item.name.as_ref().unwrap().to_string();
