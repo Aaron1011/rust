@@ -10,7 +10,6 @@
 
 //! This module contains the "cleaned" pieces of the AST, and the functions
 //! that clean them.
-#![allow(warnings)]
 
 pub use self::Type::*;
 pub use self::Mutability::*;
@@ -30,10 +29,9 @@ use syntax_pos::{self, DUMMY_SP, Pos, FileName};
 
 use rustc::middle::const_val::ConstVal;
 use rustc::middle::privacy::AccessLevels;
-use rustc::middle::region;
 use rustc::middle::resolve_lifetime as rl;
 use rustc::middle::lang_items;
-use rustc::hir::{self, LifetimeDef, LifetimeName, HirVec};
+use rustc::hir::{self, HirVec};
 use rustc::hir::def::{self, Def, CtorKind};
 use rustc::hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE, DefIndexAddressSpace};
 use rustc::traits::Reveal;
@@ -43,7 +41,7 @@ use rustc::middle::stability;
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
 use rustc::traits;
-use rustc::infer::{InferCtxt, SubregionOrigin};
+use rustc::infer::InferCtxt;
 use rustc::infer::outlives::env::OutlivesEnvironment;
 use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
@@ -56,7 +54,6 @@ use std::{mem, slice, vec};
 use std::iter::FromIterator;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::iter;
 use std::u32;
 
 use core::{self, DocContext};
@@ -70,13 +67,6 @@ mod simplify;
 
 use self::cfg::Cfg;
 
-const STATIC_LIFETIME: hir::Lifetime = hir::Lifetime {
-    id: ast::DUMMY_NODE_ID,
-    span: DUMMY_SP,
-    name: LifetimeName::Static
-};
-
-//const INVALID_DEF_ID: DefId = DefId { krate: INVALID_CRATE, index: CRATE_DEF_INDEX };
 
 // extract the stability index for a node from tcx, if possible
 fn get_stability(cx: &DocContext, def_id: DefId) -> Option<Stability> {
@@ -196,11 +186,6 @@ impl<'a, 'tcx> Clean<Crate> for visit_ast::RustdocVisitor<'a, 'tcx> {
                 }
             }));
         }
-
-        /*match module.inner {
-            ModuleItem(ref mod_) => println!("Inner: {:?}", mod_.items.iter().flat_map(|ref i| &i.name).collect::<Vec<_>>()),
-            _ => {}
-        };*/
 
         let mut access_levels = cx.access_levels.borrow_mut();
         let mut external_traits = cx.external_traits.borrow_mut();
@@ -2885,49 +2870,6 @@ pub struct Impl {
     pub items: Vec<Item>,
     pub polarity: Option<ImplPolarity>,
     pub synthetic: bool,
-    _hidden: ()
-}
-
-impl Impl {
-    pub fn new(unsafety: hir::Unsafety, generics: Generics, provided_trait_methods: FxHashSet<String>, trait_: Option<Type>, for_: Type, items: Vec<Item>, polarity: Option<ImplPolarity>, synthetic: bool) -> Impl {
-        /*if trait_.is_some() {
-            match &for_ {
-                &Type::ResolvedPath { ref path, ref typarams, ref did, ref is_generic } => {
-                    match unsafety {
-                        hir::Unsafety::Normal => {
-                            let positive = polarity.map_or(true, |p| match p { ImplPolarity::Positive => true, _ => false });
-
-                            match trait_.as_ref().unwrap() {
-                                &Type::ResolvedPath { path: ref trait_path, .. } => {
-
-                                    if (!synthetic && path.last_name() == "CannotReallocInPlace") && (trait_path.last_name() == "Send" || trait_path.last_name() == "Sync")  {
-                                        panic!("Bad impl {:?} for trait {:?} {:?} {:?}, {:?}", synthetic, unsafety, path.last_name(), for_, trait_path.last_name())
-                                    }
-                                },
-                                _ => {}
-                            };
-
-                        },
-                        _ => {}
-                    }
-
-                    println!("Creating impl {:?} for trait {:?} {:?}", synthetic, unsafety, path.last_name())
-                },
-                _ => {}
-            }
-        }*/
-        Impl {
-            unsafety,
-            generics,
-            provided_trait_methods,
-            trait_,
-            for_,
-            items,
-            polarity,
-            synthetic,
-            _hidden: ()
-        }
-    }
 }
 
 pub fn get_auto_traits_with_node_id(cx: &DocContext, id: ast::NodeId) -> Vec<Item> {
@@ -2971,8 +2913,8 @@ impl Clean<Vec<Item>> for doctree::Impl {
             visibility: self.vis.clean(cx),
             stability: self.stab.clean(cx),
             deprecation: self.depr.clean(cx),
-            inner: ImplItem(Impl::new(self.unsafety, self.generics.clean(cx), provided, trait_, self.for_.clean(cx), items, Some(self.polarity.clean(cx)), false))
-                /*unsafety: self.unsafety,
+            inner: ImplItem(Impl {
+                unsafety: self.unsafety,
                 generics: self.generics.clean(cx),
                 provided_trait_methods: provided,
                 trait_,
@@ -2980,7 +2922,7 @@ impl Clean<Vec<Item>> for doctree::Impl {
                 items,
                 polarity: Some(self.polarity.clean(cx)),
                 synthetic: false
-            }),*/
+            })
         });
         ret
     }
@@ -3058,8 +3000,8 @@ impl Clean<Item> for doctree::AutoImpl {
             visibility: Some(Public),
             stability: None,
             deprecation: None,
-            inner: ImplItem(Impl::new(self.unsafety, Default::default(), FxHashSet(), Some(self.trait_.clean(cx)), Type::DotDot, Vec::new(), None, false))
-                /*unsafety: self.unsafety,
+            inner: ImplItem(Impl {
+                unsafety: self.unsafety,
                 generics: Default::default(),
                 provided_trait_methods: FxHashSet(),
                 trait_: Some(self.trait_.clean(cx)),
@@ -3067,7 +3009,7 @@ impl Clean<Item> for doctree::AutoImpl {
                 items: Vec::new(),
                 polarity: None,
                 synthetic: false
-            }),*/
+            })
         }
     }
 }
@@ -3456,14 +3398,11 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 
     pub fn get_auto_trait_impls(&self, def_id: DefId, def_ctor: fn(DefId) -> Def) -> Vec<Item> {
-        //let item = self.cx.tcx.hir.expect_item(id);
-        //let def_id = self.cx.tcx.hir.local_def_id(id);
         let tcx = self.cx.tcx;
         let generics = self.cx.tcx.generics_of(def_id);
 
 
-        println!("Get auto traits for type '{:?}' with initial generics '{:?}'", def_id, generics);
-
+        debug!("get_auto_trait_impls(def_id={:?}, def_ctor={:?}, generics={:?}", def_id, def_ctor, generics);
         let auto_traits: Vec<_> = self.cx.send_trait.and_then(|send_trait| self.get_auto_trait_impl_for(def_id, generics.clone(), def_ctor, send_trait)).into_iter()
               .chain(self.get_auto_trait_impl_for(def_id, generics.clone(), def_ctor, tcx.require_lang_item(lang_items::SyncTraitLangItem)).into_iter())
               //.chain(self.get_auto_trait_impl_for(item.id, def_id, generics.clone(), def_ctor, tcx.require_lang_item(lang_items::SizedTraitLangItem)).into_iter())
@@ -3476,20 +3415,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     fn get_auto_trait_impl_for(&self, def_id: DefId, generics: ty::Generics, def_ctor: fn(DefId) -> Def, trait_def_id: DefId) -> Option<Item> {
         if !self.cx.generated_synthetics.borrow_mut().insert((def_id, trait_def_id)) {
-            println!("Already generated for {:?} {:?}", def_id, trait_def_id);
+            debug!("get_auto_trait_impl_for(def_id={:?}, generics={:?}, def_ctor={:?}, trait_def_id={:?}): already generated, aborting", def_id, generics, def_ctor, trait_def_id);
             return None;
         }
-        /*let mut impl_cache = self.cx.auto_trait_impls.borrow_mut();
-        let entry = impl_cache.entry((def_id, trait_def_id));
-
-        match entry {
-            Entry::Occupied(e) => {
-                println!("Found cached for {:?} {:?}", def_id, trait_def_id);
-                return e.get().clone();
-            },
-            _ => {}
-        };*/
-
+        
         let result = self.find_auto_trait_generics(def_id, trait_def_id, &generics);
 
         if result.is_auto() {
@@ -3532,8 +3461,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 hir_id: hir::DUMMY_HIR_ID
             };
 
-            //let auto_trait = self.cx.tcx.type_of(trait_def_id);
-            let item = Some(Item {
+            return Some(Item {
                 source: Span::empty(),
                 name: None,
                 attrs: Default::default(),
@@ -3541,11 +3469,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 def_id: self.next_def_id(def_id.krate),
                 stability: None,
                 deprecation: None,
-                inner: ImplItem(Impl::new(hir::Unsafety::Normal, new_generics, FxHashSet(), Some(trait_.clean(self.cx)), ty.clean(self.cx), Vec::new(), polarity, true))
-            });
-
-            return item
-                    /*unsafety: hir::Unsafety::Normal,
+                inner: ImplItem(Impl {
+                    unsafety: hir::Unsafety::Normal,
                     generics: new_generics,
                     provided_trait_methods: FxHashSet(),
                     trait_: Some(trait_.clean(self.cx)),
@@ -3553,8 +3478,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     items: Vec::new(),
                     polarity,
                     synthetic: true
-                })*/
-
+                })
+            });
         }
         None
     }
@@ -3603,8 +3528,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let orig_params = tcx.param_env(did);
 
 
-        println!("New logic: '{:?}' '{:?}' '{:?}' '{:?}'", ty, trait_did, orig_params, generics);
-
         let trait_ref = ty::TraitRef {
             def_id: trait_did,
             substs: tcx.mk_substs_trait(ty, &[]),
@@ -3617,7 +3540,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let result = selcx.select(&Obligation::new(ObligationCause::dummy(), orig_params, trait_pred.to_poly_trait_predicate()));
             match result {
                 Ok(Some(Vtable::VtableImpl(_))) => {
-                    println!("Manual impl {:?} for trait {:?} on ty {:?}. Bailing out", result, trait_did, ty);
+                    debug!("find_auto_trait_generics(did={:?}, trait_did={:?}, generics={:?}): manual impl found, bailing out", did, trait_did, generics);
                     return true
                 },
                 _ => return false
@@ -3635,25 +3558,18 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let mut last_env = orig_params;
 
             while result.ok().map_or(false, |o| o.is_some()) {
-                //println!("Evalauting with predicates: {:?}", result.ok().unwrap().unwrap());
                 last_env = result.ok().unwrap().unwrap();
                 result = self.evaluate_predicates(&mut infcx, trait_did, ty, result.ok().unwrap().unwrap());
                 infcx.clear_caches();
             }
 
             if result.err().is_some() {
-                println!("Ty {:?} cannot implement '{:?}' because '{:?}'", ty, trait_did, result.err().unwrap());
                 return AutoTraitResult::NegativeImpl
             }
 
             let names_map: FxHashMap<String, Lifetime> = generics.regions.iter().map(|l|  {
                     (l.name.as_str().to_string(), l.clean(self.cx))
             }).collect();
-
-
-
-            println!("Finished: '{:?}' '{:?}' '{:?}'", ty, result, last_env);
-
 
             let body_ids: FxHashSet<_> = infcx.region_obligations.borrow().iter().map(|&(id, _)| id).collect();
 
@@ -3662,50 +3578,18 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             }
 
             let region_data = infcx.borrow_region_constraints().region_constraint_data().clone();
-                //println!("Region data new constrains: {:?}", region_data.constraints);
-                //println!("Region data verifies: {:?}", region_data.verifys);
-            println!("Can borrow: {:?}", infcx.region_constraints.try_borrow_mut().err());
-            //drop(constraint);
-            //let region_data = infcx.region_constraints.borrow().as_ref().unwrap().region_constraint_data().clone();
-
 
             infcx.resolve_regions_and_report_errors(trait_did, &Default::default(), &OutlivesEnvironment::new(last_env));
-            //println!("Lexical resolutions: {:?}", infcx.lexical_region_resolutions.borrow());
 
             let unsolved = infcx.region_obligations.borrow().clone();
             if !unsolved.is_empty() {
                 panic!("Unsolved: {:?}", unsolved);
             }
 
-            //let new_data = infcx.take_and_reset_region_constraints();
-
-            //infcx.resolve_regions_and_report_errors(
-
-            /*let unsolved_constraints: Vec<_> = unsolved.into_iter().map(|o| {
-                ty::Predicate::TypeOutlives(ty::Binder(ty::OutlivesPredicate(o.1.sup_type, o.1.sub_region)))
-            }).collect();*/
-
-            /*let new_preds: Vec<_> = last_env.caller_bounds.into_iter().map(|p| p.clone()).chain(unsolved_constraints.into_iter()).collect();
-
-            println!("New preds: {:?}", new_preds);
-
-            let new_param_env = ty::ParamEnv {
-                caller_bounds: tcx.intern_predicates(&tcx.lift_to_global(&new_preds).unwrap()),
-                reveal: last_env.reveal
-            };*/
-
-            //println!("New params: {:?}", new_param_env);
-
-            //let region_data = infcx.take_and_reset_region_constraints();
-            println!("Solved constraints: {:?}", region_data.constraints);
-            println!("Verifies: {:?}", region_data.verifys);
-            //println!("Final infer ctx: {:?}", region_data);
-
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
-            println!("New liftimes: {:?}", lifetime_predicates);
 
-            let new_generics = self.param_env_to_generics(ty, did, last_env, generics.clone(), lifetime_predicates);
-            println!("Ty {:?} has new generics: '{:?}'", ty, new_generics);
+            let new_generics = self.param_env_to_generics(did, last_env, generics.clone(), lifetime_predicates);
+            debug!("find_auto_trait_generics(ty={:?}, did={:?}): {:?}", ty, did, new_generics);
             return AutoTraitResult::PositiveImpl(new_generics);
 
         });
@@ -3715,13 +3599,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>) -> Result<Option<ty::ParamEnv<'c>>, Option<Predicate<'c>>> {
         let tcx = infcx.tcx;
         let mut fulfill = traits::FulfillmentContext::new();
-        //let new_env = ty::ParamEnv::new(tcx.intern_predicates(&tcx.lift_to_global(&predicates).unwrap()), traits::Reveal::UserFacing);
 
         fulfill.register_bound(&infcx, param_env, ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
 
         let result = fulfill.select_all_or_error(&infcx);
-
-        println!("Selection result for '{:?}' is '{:?}'", ty, result);
 
         if result.is_ok() {
             return Ok(None)
@@ -3740,9 +3621,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         match wrong_err {
             Some(_) => {
-                println!("Unable to proceed further: {:?}", wrong_err.unwrap());
                 return Err(None);
-                //return Err(Some(e.obligation.predicate));
             },
             _ => {}
         };
@@ -3751,8 +3630,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         predicates.extend(param_env.caller_bounds.clone());
 
         for e in errs.iter() {
-            //println!("Obligation params: {:?}", e.obligation.param_env);
-
             let p = match e.obligation.predicate {
                 Predicate::Trait(p) => p,
                 _ => panic!("Unexpected predicate {:?}", e.obligation.predicate)
@@ -3784,10 +3661,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let params = self.type_vars_from_predicate(p.skip_binder());
 
             if params.is_none() {
-                println!("Unable to simplify predicate '{:?}'. Aborting", e.obligation.predicate);
                 return Err(Some(e.obligation.predicate))
             }
-            println!("Predicate '{:?}' can be satisfied!", e.obligation.predicate);
 
             predicates.push(e.obligation.predicate);
         }
@@ -3800,7 +3675,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             match &t.sty {
                 &ty::TyParam(p) => Some(p),
                 _ => {
-                    println!("Found mon param in predicate: '{:?}' '{:?}'", t, p);
                     None
                 }
             }
@@ -3923,9 +3797,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             }
         }
 
-        println!("Computed lifetimes: {:?}", finished);
-
-
         let mut finished_map = FxHashMap();
 
         for &(larger, smaller) in finished.iter() {
@@ -3952,7 +3823,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         lifetime_predicates
     }
 
-    fn param_env_to_generics(&self, ty: ty::Ty, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, lifetime_predicates: Vec<WherePredicate>) -> Generics {
+    fn param_env_to_generics(&self, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, lifetime_predicates: Vec<WherePredicate>) -> Generics {
         let trait_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
             match p { &Predicate::Trait(ref pred) => Some(pred), _ => None  }
         }).collect();
@@ -3992,7 +3863,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         // it is *not* required (i.e. '?Sized')
         let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
 
-        let mut where_predicates: Vec<_> = (&var_to_predicates).iter().flat_map(|(name, preds)| {
+        let where_predicates: Vec<_> = (&var_to_predicates).iter().flat_map(|(name, preds)| {
 
             let mut has_sized_bound = false;
             let existing_bounds = bounds_map.get(&*name.as_str()).unwrap();
@@ -4014,8 +3885,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     }
                     _ => panic!("Unexpected predicate '{:?}' '{:?}'", pred, var_to_predicates)
                 };
-
-                println!("Ty: {:?} Bound: {:?} Existing: {:?}", ty, bound, existing_bounds);
 
                 if !existing_bounds.contains(&SimpleBound::from(bound.clone())) {
                     return Some(bound)
@@ -4057,6 +3926,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let Generics { params: generic_params, where_predicates: mut generic_where_predicates } = full_generics.clean(self.cx);
 
         generic_where_predicates.extend(lifetime_predicates);
+        generic_where_predicates.extend(where_predicates);
 
         Generics {
             params: generic_params,
@@ -4233,10 +4103,6 @@ enum AutoTraitResult {
 }
 
 impl AutoTraitResult {
-
-    fn is_explicit(&self) -> bool {
-        !self.is_auto()
-    }
 
     fn is_auto(&self) -> bool {
         match *self {

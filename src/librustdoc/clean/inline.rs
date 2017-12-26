@@ -232,13 +232,10 @@ pub fn build_impls(cx: &DocContext, did: DefId, auto_traits: bool) -> Vec<clean:
     }
 
     if auto_traits {
-        println!("Inlining impls for {:?}", did);
         let auto_impls = get_auto_traits_with_def_id(cx, did);
         let mut renderinfo = cx.renderinfo.borrow_mut();
 
         let new_impls: Vec<clean::Item> = auto_impls.into_iter().filter(|i| renderinfo.inlined.insert(i.def_id)).collect();
-
-        println!("Inlined impls for {:?} {:?}", did, new_impls.len());
 
         impls.extend(new_impls);
     }
@@ -318,23 +315,19 @@ pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
     // If this is an auto impl, then bail out early here
     if tcx.is_auto_impl(did) {
         return ret.push(clean::Item {
-            inner: clean::ImplItem(clean::Impl::new(hir::Unsafety::Normal, Default::default(), FxHashSet(), Some(match associated_trait.as_ref().unwrap().clean(cx) {
-                    clean::TraitBound(polyt, _) => polyt.trait_,
-                    clean::RegionBound(..) => unreachable!(),
-                }), clean::Type::DotDot, Vec::new(), None, false)),
-                // FIXME: this should be decoded
-                /*unsafety: hir::Unsafety::Normal,
-                generics: Default::default(),
-                provided_trait_methods: FxHashSet(),
-                trait_: Some(match associated_trait.as_ref().unwrap().clean(cx) {
-                    clean::TraitBound(polyt, _) => polyt.trait_,
-                    clean::RegionBound(..) => unreachable!(),
-                }),
-                for_: clean::Type::DotDot,
-                items: Vec::new(),
-                polarity: None,
-                synthetic: false
-            }),*/
+            inner: clean::ImplItem(clean::Impl {
+                    unsafety: hir::Unsafety::Normal,
+                    generics: Default::default(),
+                    provided_trait_methods: FxHashSet(),
+                    trait_: Some(match associated_trait.as_ref().unwrap().clean(cx) {
+                        clean::TraitBound(polyt, _) => polyt.trait_,
+                        clean::RegionBound(..) => unreachable!(),
+                    }),
+                    for_: clean::Type::DotDot,
+                    items: Vec::new(),
+                    polarity: None,
+                    synthetic: false
+            }),
             source: tcx.def_span(did).clean(cx),
             name: None,
             attrs,
@@ -385,16 +378,16 @@ pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
     }).unwrap_or(FxHashSet());
 
     ret.push(clean::Item {
-        inner: clean::ImplItem(clean::Impl::new(hir::Unsafety::Normal, (tcx.generics_of(did), &predicates).clean(cx), provided, trait_, for_, trait_items, Some(polarity.clean(cx)), false)),
-            /*unsafety: hir::Unsafety::Normal, // FIXME: this should be decoded
+        inner: clean::ImplItem(clean::Impl {
+            unsafety: hir::Unsafety::Normal,
+            generics: (tcx.generics_of(did), &predicates).clean(cx),
             provided_trait_methods: provided,
             trait_,
             for_,
-            generics: (tcx.generics_of(did), &predicates).clean(cx),
             items: trait_items,
             polarity: Some(polarity.clean(cx)),
-            synthetic: false // TODO - would we ever be inlinig synthetic impls?
-        }),*/
+            synthetic: false
+        }),
         source: tcx.def_span(did).clean(cx),
         name: None,
         attrs,

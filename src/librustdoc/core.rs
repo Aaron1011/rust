@@ -216,8 +216,6 @@ pub fn run_core(search_paths: SearchPaths,
             send_trait = clean::get_trait_def_id(&tcx, &["core", "marker", "Send"], false)
         }
 
-        println!("Send trait: {:?}", send_trait);
-
         let ctxt = DocContext {
             tcx,
             cstore: cstore.clone(),

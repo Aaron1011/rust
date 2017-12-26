@@ -2639,13 +2639,10 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
             .partition::<Vec<_>, _>(|i| i.inner_impl().for_.def_id()
                                          .map_or(true, |d| cache.paths.contains_key(&d)));
 
-        println!("Trait {:?} num local {:?} num foreign {:?}", it.name, local.len(), foreign.len());
 
         let (synthetic, concrete) = local.iter()
             .partition::<Vec<_>, _>(|i| i.inner_impl().synthetic);
 
-
-        println!("Trait {:?} num concrete {:?} num synthetic {:?}", it.name, concrete.len(), synthetic.len());
 
         if !foreign.is_empty() {
             write!(w, "
