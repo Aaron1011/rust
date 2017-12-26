@@ -41,7 +41,7 @@ use doctree::*;
 // framework from syntax?
 
 pub struct RustdocVisitor<'a, 'tcx: 'a> {
-    cstore: &'tcx CrateStore,
+    pub cstore: &'tcx CrateStore,
     pub module: Module,
     pub attrs: hir::HirVec<ast::Attribute>,
     pub cx: &'a core::DocContext<'a, 'tcx>,
@@ -324,6 +324,8 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
             Some(n) => n, None => return false
         };
 
+        println!("Actually inlining: {:?} {:?}", def_did, def);
+
         let is_private = !self.cx.access_levels.borrow().is_public(def_did);
         let is_hidden = inherits_doc_hidden(self.cx, def_node_id);
 
@@ -500,7 +502,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                                     .collect();
                 let t = Trait {
                     // We deliberately ignore the 'auto' field in ItemTrait
-                    // as we want to allow  legacy 'impl Trait for ..' 
+                    // as we want to allow  legacy 'impl Trait for ..'
                     auto: self.cx.tcx.trait_is_auto(self.cx.tcx.hir.local_def_id(item.id)),
                     unsafety,
                     name,
@@ -533,6 +535,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     let items = item_ids.iter()
                                         .map(|ii| self.cx.tcx.hir.impl_item(ii.id).clone())
                                         .collect();
+
                     let i = Impl {
                         unsafety,
                         polarity,

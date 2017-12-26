@@ -11,13 +11,14 @@
 use rustc_lint;
 use rustc_driver::{driver, target_features, abort_on_err};
 use rustc::session::{self, config};
-use rustc::hir::def_id::{DefId, DefIndexAddressSpace, LOCAL_CRATE};
+use rustc::hir::def_id::{DefId, CrateNum};
 use rustc::hir::def::Def;
+use rustc::middle::cstore::CrateStore;
 use rustc::middle::privacy::AccessLevels;
 use rustc::ty::{self, TyCtxt, AllArenas};
 use rustc::hir::map as hir_map;
 use rustc::lint;
-use rustc::util::nodemap::FxHashMap;
+use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_trans;
 use rustc_resolve as resolve;
 use rustc_metadata::cstore::CStore;
@@ -44,6 +45,7 @@ pub type ExternalPaths = FxHashMap<DefId, (Vec<String>, clean::TypeKind)>;
 
 pub struct DocContext<'a, 'tcx: 'a> {
     pub tcx: TyCtxt<'a, 'tcx, 'tcx>,
+    pub cstore: Rc<CrateStore>,
     pub populated_all_crate_impls: Cell<bool>,
     // Note that external items for which `doc(hidden)` applies to are shown as
     // non-reachable while local items aren't. This is because we're reusing
@@ -63,7 +65,9 @@ pub struct DocContext<'a, 'tcx: 'a> {
     /// Table node id of lifetime parameter definition -> substituted lifetime
     pub lt_substs: RefCell<FxHashMap<DefId, clean::Lifetime>>,
     pub send_trait: Option<DefId>,
-    pub fake_def_id: Cell<DefId>
+    pub fake_def_ids: RefCell<FxHashMap<CrateNum, DefId>>,
+    /// Maps (type_id, trait_id) -> auto trait impl
+    pub generated_synthetics: RefCell<FxHashSet<(DefId, DefId)>>
 }
 
 impl<'a, 'tcx> DocContext<'a, 'tcx> {
@@ -216,6 +220,7 @@ pub fn run_core(search_paths: SearchPaths,
 
         let ctxt = DocContext {
             tcx,
+            cstore: cstore.clone(),
             populated_all_crate_impls: Cell::new(false),
             access_levels: RefCell::new(access_levels),
             external_traits: Default::default(),
@@ -223,11 +228,13 @@ pub fn run_core(search_paths: SearchPaths,
             ty_substs: Default::default(),
             lt_substs: Default::default(),
             send_trait: send_trait,
-            fake_def_id: Cell::new(DefId {
+            fake_def_ids: RefCell::new(FxHashMap()),/*Cell::new(DefId {
                 krate: LOCAL_CRATE,
                 index: tcx.hir.definitions().def_path_table().next_id(DefIndexAddressSpace::Low)
 
-            })
+            }),*/
+            generated_synthetics: RefCell::new(FxHashSet())
+
         };
         debug!("crate: {:?}", tcx.hir.krate());
 

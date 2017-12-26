@@ -35,7 +35,7 @@ use rustc::middle::resolve_lifetime as rl;
 use rustc::middle::lang_items;
 use rustc::hir::{self, LifetimeDef, LifetimeName, HirVec};
 use rustc::hir::def::{self, Def, CtorKind};
-use rustc::hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE};
+use rustc::hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE, DefIndexAddressSpace};
 use rustc::traits::Reveal;
 use rustc::ty::subst::Substs;
 use rustc::ty::{self, TyCtxt, Predicate, TraitPredicate, Region, RegionVid, Ty, AdtKind};
@@ -2884,7 +2884,50 @@ pub struct Impl {
     pub for_: Type,
     pub items: Vec<Item>,
     pub polarity: Option<ImplPolarity>,
-    pub synthetic: bool
+    pub synthetic: bool,
+    _hidden: ()
+}
+
+impl Impl {
+    pub fn new(unsafety: hir::Unsafety, generics: Generics, provided_trait_methods: FxHashSet<String>, trait_: Option<Type>, for_: Type, items: Vec<Item>, polarity: Option<ImplPolarity>, synthetic: bool) -> Impl {
+        /*if trait_.is_some() {
+            match &for_ {
+                &Type::ResolvedPath { ref path, ref typarams, ref did, ref is_generic } => {
+                    match unsafety {
+                        hir::Unsafety::Normal => {
+                            let positive = polarity.map_or(true, |p| match p { ImplPolarity::Positive => true, _ => false });
+
+                            match trait_.as_ref().unwrap() {
+                                &Type::ResolvedPath { path: ref trait_path, .. } => {
+
+                                    if (!synthetic && path.last_name() == "CannotReallocInPlace") && (trait_path.last_name() == "Send" || trait_path.last_name() == "Sync")  {
+                                        panic!("Bad impl {:?} for trait {:?} {:?} {:?}, {:?}", synthetic, unsafety, path.last_name(), for_, trait_path.last_name())
+                                    }
+                                },
+                                _ => {}
+                            };
+
+                        },
+                        _ => {}
+                    }
+
+                    println!("Creating impl {:?} for trait {:?} {:?}", synthetic, unsafety, path.last_name())
+                },
+                _ => {}
+            }
+        }*/
+        Impl {
+            unsafety,
+            generics,
+            provided_trait_methods,
+            trait_,
+            for_,
+            items,
+            polarity,
+            synthetic,
+            _hidden: ()
+        }
+    }
 }
 
 pub fn get_auto_traits_with_node_id(cx: &DocContext, id: ast::NodeId) -> Vec<Item> {
@@ -2893,6 +2936,7 @@ pub fn get_auto_traits_with_node_id(cx: &DocContext, id: ast::NodeId) -> Vec<Ite
 }
 
 pub fn get_auto_traits_with_def_id(cx: &DocContext, id: DefId) -> Vec<Item> {
+
     let finder = AutoTraitFinder {
         cx,
     };
@@ -2927,8 +2971,8 @@ impl Clean<Vec<Item>> for doctree::Impl {
             visibility: self.vis.clean(cx),
             stability: self.stab.clean(cx),
             deprecation: self.depr.clean(cx),
-            inner: ImplItem(Impl {
-                unsafety: self.unsafety,
+            inner: ImplItem(Impl::new(self.unsafety, self.generics.clean(cx), provided, trait_, self.for_.clean(cx), items, Some(self.polarity.clean(cx)), false))
+                /*unsafety: self.unsafety,
                 generics: self.generics.clean(cx),
                 provided_trait_methods: provided,
                 trait_,
@@ -2936,7 +2980,7 @@ impl Clean<Vec<Item>> for doctree::Impl {
                 items,
                 polarity: Some(self.polarity.clean(cx)),
                 synthetic: false
-            }),
+            }),*/
         });
         ret
     }
@@ -3014,8 +3058,8 @@ impl Clean<Item> for doctree::AutoImpl {
             visibility: Some(Public),
             stability: None,
             deprecation: None,
-            inner: ImplItem(Impl {
-                unsafety: self.unsafety,
+            inner: ImplItem(Impl::new(self.unsafety, Default::default(), FxHashSet(), Some(self.trait_.clean(cx)), Type::DotDot, Vec::new(), None, false))
+                /*unsafety: self.unsafety,
                 generics: Default::default(),
                 provided_trait_methods: FxHashSet(),
                 trait_: Some(self.trait_.clean(cx)),
@@ -3023,7 +3067,7 @@ impl Clean<Item> for doctree::AutoImpl {
                 items: Vec::new(),
                 polarity: None,
                 synthetic: false
-            }),
+            }),*/
         }
     }
 }
@@ -3431,6 +3475,21 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 
     fn get_auto_trait_impl_for(&self, def_id: DefId, generics: ty::Generics, def_ctor: fn(DefId) -> Def, trait_def_id: DefId) -> Option<Item> {
+        if !self.cx.generated_synthetics.borrow_mut().insert((def_id, trait_def_id)) {
+            println!("Already generated for {:?} {:?}", def_id, trait_def_id);
+            return None;
+        }
+        /*let mut impl_cache = self.cx.auto_trait_impls.borrow_mut();
+        let entry = impl_cache.entry((def_id, trait_def_id));
+
+        match entry {
+            Entry::Occupied(e) => {
+                println!("Found cached for {:?} {:?}", def_id, trait_def_id);
+                return e.get().clone();
+            },
+            _ => {}
+        };*/
+
         let result = self.find_auto_trait_generics(def_id, trait_def_id, &generics);
 
         if result.is_auto() {
@@ -3458,7 +3517,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let path = get_path_for_type(self.cx.tcx, def_id, def_ctor);
             let mut segments = path.segments.into_vec();
             let last = segments.pop().unwrap();
-            segments.push(hir::PathSegment::new(last.name, self.generics_to_path_params(generics.clone()), false));
+            segments.push(hir::PathSegment::new(last.name, self.generics_to_path_params(generics.clone(), def_id.krate), false));
 
             let new_path = hir::Path {
                 span: path.span,
@@ -3474,16 +3533,19 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             };
 
             //let auto_trait = self.cx.tcx.type_of(trait_def_id);
-            return Some(Item {
+            let item = Some(Item {
                 source: Span::empty(),
                 name: None,
                 attrs: Default::default(),
                 visibility: None,
-                def_id: self.next_def_id(),
+                def_id: self.next_def_id(def_id.krate),
                 stability: None,
                 deprecation: None,
-                inner: ImplItem(Impl {
-                    unsafety: hir::Unsafety::Normal,
+                inner: ImplItem(Impl::new(hir::Unsafety::Normal, new_generics, FxHashSet(), Some(trait_.clean(self.cx)), ty.clean(self.cx), Vec::new(), polarity, true))
+            });
+
+            return item
+                    /*unsafety: hir::Unsafety::Normal,
                     generics: new_generics,
                     provided_trait_methods: FxHashSet(),
                     trait_: Some(trait_.clean(self.cx)),
@@ -3491,13 +3553,13 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     items: Vec::new(),
                     polarity,
                     synthetic: true
-                })
-            })
+                })*/
+
         }
         None
     }
 
-    fn generics_to_path_params(&self, generics: ty::Generics) -> hir::PathParameters {
+    fn generics_to_path_params(&self, generics: ty::Generics, cnum: CrateNum) -> hir::PathParameters {
         let lifetimes = HirVec::from_vec(generics.regions.iter().map(|p| {
             let name = if p.name == "" {
                 hir::LifetimeName::Static
@@ -3511,7 +3573,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 name
             }
         }).collect());
-        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.name))).collect());
+        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.name, cnum))).collect());
 
         hir::PathParameters {
             lifetimes: lifetimes,
@@ -3521,12 +3583,12 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn ty_param_to_ty(&self, name: ast::Name) -> hir::Ty {
+    fn ty_param_to_ty(&self, name: ast::Name, cnum: CrateNum) -> hir::Ty {
         hir::Ty {
             id: ast::DUMMY_NODE_ID,
             node: hir::Ty_::TyPath(hir::QPath::Resolved(None, P(hir::Path {
                 span: DUMMY_SP,
-                def: Def::TyParam(self.next_def_id()),
+                def: Def::TyParam(self.next_def_id(cnum)),
                 segments: HirVec::from_vec(vec![hir::PathSegment::from_name(name)])
             }))),
             span: DUMMY_SP,
@@ -3966,7 +4028,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     trait_: Type::ResolvedPath {
                         path: get_path_for_type(self.cx.tcx, sized_trait, hir::def::Def::Trait).clean(self.cx),
                         typarams: None,
-                        did: self.next_def_id(),
+                        did: self.next_def_id(did.krate),
                         is_generic: false
                     },
                     generic_params: Vec::new()
@@ -3981,7 +4043,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 ty: Type::ResolvedPath {
                     path: Path::singleton(name.as_str().to_string()),
                     typarams: None,
-                    did: self.next_def_id(),
+                    did: self.next_def_id(did.krate),
                     is_generic: false
                 },
                 bounds
@@ -4002,13 +4064,31 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn next_def_id(&self) -> DefId {
-        let def_id = self.cx.fake_def_id.get();
-        self.cx.fake_def_id.set(DefId {
-            krate: def_id.krate,
+    fn next_def_id(&self, crate_num: CrateNum) -> DefId {
+
+        let start_def_id = || {
+            let next_id = if crate_num == LOCAL_CRATE {
+                self.cx.tcx.hir.definitions().def_path_table().next_id(DefIndexAddressSpace::Low)
+            } else {
+                self.cx.cstore.def_path_table(crate_num).next_id(DefIndexAddressSpace::Low)
+            };
+
+            DefId {
+                krate: crate_num,
+                index: next_id
+            }
+
+        };
+
+        let mut fake_ids = self.cx.fake_def_ids.borrow_mut();
+
+        let def_id = fake_ids.entry(crate_num).or_insert_with(start_def_id).clone();
+        fake_ids.insert(crate_num, DefId {
+            krate: crate_num,
             index: DefIndex::from_u32(def_id.index.as_u32() + 1)
         });
-        def_id
+
+        def_id.clone()
     }
 }
 

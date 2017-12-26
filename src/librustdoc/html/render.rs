@@ -478,7 +478,9 @@ fn init_ids() -> FxHashMap<String, usize> {
      "required-methods",
      "provided-methods",
      "implementors",
+     "synthetic-implementors",
      "implementors-list",
+     "synthetic-implementors-list",
      "methods",
      "deref-methods",
      "implementations",
@@ -1000,7 +1002,7 @@ fn write_shared(cx: &Context,
             // should add it.
             if !imp.impl_item.def_id.is_local() { continue }
             have_impls = true;
-            write!(implementors, "{},", as_json(&imp.inner_impl().to_string())).unwrap();
+            write!(implementors, "{{text:{},synthetic:{}}},", as_json(&imp.inner_impl().to_string()), imp.inner_impl().synthetic).unwrap();
         }
         implementors.push_str("];");
 
@@ -1229,8 +1231,6 @@ impl DocFolder for Cache {
             if !self.masked_crates.contains(&item.def_id.krate) {
                 if let Some(did) = i.trait_.def_id() {
                     if i.for_.def_id().map_or(true, |d| !self.masked_crates.contains(&d.krate)) {
-                        self.implementors.entry(did).or_insert(vec![]).push(Impl {
-                            impl_item: item.clone(),
                         /*let target = if i.synthetic {
                             self.synthetic_implementors
                         } else {
@@ -2639,8 +2639,13 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
             .partition::<Vec<_>, _>(|i| i.inner_impl().for_.def_id()
                                          .map_or(true, |d| cache.paths.contains_key(&d)));
 
+        println!("Trait {:?} num local {:?} num foreign {:?}", it.name, local.len(), foreign.len());
+
         let (synthetic, concrete) = local.iter()
             .partition::<Vec<_>, _>(|i| i.inner_impl().synthetic);
+
+
+        println!("Trait {:?} num concrete {:?} num synthetic {:?}", it.name, concrete.len(), synthetic.len());
 
         if !foreign.is_empty() {
             write!(w, "
@@ -2662,7 +2667,9 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
         for implementor in concrete {
             render_implementor(cx, implementor, w, &implementor_dups)?;
         }
+        write!(w, "</ul>")?;
 
+<<<<<<< HEAD
         for implementor in local {
             write!(w, "<li>")?;
             if let Some(l) = (Item { cx, item: &implementor.impl_item }).src_href() {
@@ -2698,13 +2705,25 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
             render_implementor(cx, implementor, w, &implementor_dups)?;
         }
 
+        if t.auto {
+            write!(w, "{}", synthetic_impl_header)?;
+            for implementor in synthetic {
+                render_implementor(cx, implementor, w, &implementor_dups)?;
+            }
+            write!(w, "</ul>")?;
+        }
+
     } else {
         // even without any implementations to write in, we still want the heading and list, so the
         // implementors javascript file pulled in below has somewhere to write the impls into
         write!(w, "{}", impl_header)?;
-        write!(w, "{}", synthetic_impl_header)?;
+        write!(w, "</ul>")?;
+
+        if t.auto {
+            write!(w, "{}", synthetic_impl_header)?;
+            write!(w, "</ul>")?;
+        }
     }
-    write!(w, "</ul>")?;
     write!(w, r#"<script type="text/javascript" async
                          src="{root_path}/implementors/{path}/{ty}.{name}.js">
                  </script>"#,
@@ -3850,7 +3869,7 @@ fn sidebar_assoc_items(it: &clean::Item) -> String {
                                                            encoded,
                                                            if is_negative_impl { "!" } else { "" },
                                                            out);
-                                   if !links.contains(&generated) && links.insert(generated.clone()) {
+                                   if links.insert(generated.clone()) {
                                        Some(generated)
                                    } else {
                                        None
@@ -4020,6 +4039,9 @@ fn sidebar_trait(fmt: &mut fmt::Formatter, it: &clean::Item,
     }
 
     sidebar.push_str("<a class=\"sidebar-title\" href=\"#implementors\">Implementors</a>");
+    if t.auto {
+        sidebar.push_str("<a class=\"sidebar-title\" href=\"#synthetic-implementors\">Auto Implementors</a>");
+    }
 
     sidebar.push_str(&sidebar_assoc_items(it));
 
