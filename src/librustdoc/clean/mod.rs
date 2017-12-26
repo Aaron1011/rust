@@ -3437,8 +3437,28 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 AutoTraitResult::NegativeImpl => {
                     polarity = Some(ImplPolarity::Negative);
 
-                    let real_generics = (&generics, &self.cx.tcx.predicates_of(def_id));
-                    real_generics.clean(self.cx)
+                    // For negative impls, we use the generic params, but *not* the predicates,
+                    // from the original type. Otherwise, the displayed impl appears to be a
+                    // conditional negative impl, when it's really unconditional.
+                    //
+                    // For example, consider the struct Foo<T: Copy>(*mut T). Using
+                    // the original predicates in our impl would cause us to generate
+                    // `impl !Send for Foo<T: Copy>`, which makes it appear that Foo
+                    // implements Send where T is not copy.
+                    //
+                    // Instead, we generate `impl !Send for Foo<T>`, which better
+                    // expresses the fact that `Foo<T>` never implements `Send`,
+                    // regardless of the choice of `T`.
+                    let real_generics = (&generics, &Default::default());
+
+                    // Clean the generics, but ignore the '?Sized' bounds generated
+                    // by the `Clean` impl
+                    let clean_generics = real_generics.clean(self.cx);
+
+                    Generics {
+                        params: clean_generics.params,
+                        where_predicates: Vec::new()
+                    }
                 },
                 _ => unreachable!()
             };
@@ -3823,7 +3843,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         lifetime_predicates
     }
 
-    fn param_env_to_generics(&self, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, lifetime_predicates: Vec<WherePredicate>) -> Generics {
+    fn param_env_to_generics(&self, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>) -> Generics {
         let trait_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
             match p { &Predicate::Trait(ref pred) => Some(pred), _ => None  }
         }).collect();
@@ -3863,7 +3883,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         // it is *not* required (i.e. '?Sized')
         let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
 
-        let where_predicates: Vec<_> = (&var_to_predicates).iter().flat_map(|(name, preds)| {
+        existing_predicates.extend((&var_to_predicates).iter().flat_map(|(name, preds)| {
 
             let mut has_sized_bound = false;
             let existing_bounds = bounds_map.get(&*name.as_str()).unwrap();
@@ -3919,18 +3939,15 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             };
 
             Some(where_predicate)
-        }).collect();
+        }));
 
         let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
 
-        let Generics { params: generic_params, where_predicates: mut generic_where_predicates } = full_generics.clean(self.cx);
-
-        generic_where_predicates.extend(lifetime_predicates);
-        generic_where_predicates.extend(where_predicates);
+        let Generics { params: generic_params, .. } = full_generics.clean(self.cx);
 
         Generics {
             params: generic_params,
-            where_predicates: generic_where_predicates
+            where_predicates: existing_predicates
         }
     }
 
