@@ -1562,6 +1562,17 @@
                 var struct = structs[j];
                 var list = struct.synthetic ? synthetic_implementors : implementors;
 
+                var bail = false;
+                for (var k = 0; k < struct.types.length; k++) {
+                    if (window.inlined_types.has(struct.types[k])) {
+                        bail = true;
+                        break;
+                    }
+                }
+                if (bail) {
+                    continue;
+                }
+
                 var code = document.createElement('code');
                 code.innerHTML = struct.text;
 

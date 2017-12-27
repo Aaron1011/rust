@@ -12,7 +12,6 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::iter::once;
 use std::rc::Rc;
 
 use syntax::ast;
@@ -25,7 +24,7 @@ use rustc::util::nodemap::FxHashSet;
 
 use core::{DocContext, DocAccessLevels};
 use doctree;
-use clean::{self, GetDefId, get_auto_traits_with_def_id};
+use clean::{self, GetDefId, get_auto_traits_with_def_id, def_id_to_path};
 
 use super::Clean;
 
@@ -120,22 +119,13 @@ pub fn load_attrs(cx: &DocContext, did: DefId) -> clean::Attributes {
     cx.tcx.get_attrs(did).clean(cx)
 }
 
+
 /// Record an external fully qualified name in the external_paths cache.
 ///
 /// These names are used later on by HTML rendering to generate things like
 /// source links back to the original item.
 pub fn record_extern_fqn(cx: &DocContext, did: DefId, kind: clean::TypeKind) {
-    let crate_name = cx.tcx.crate_name(did.krate).to_string();
-    let relative = cx.tcx.def_path(did).data.into_iter().filter_map(|elem| {
-        // extern blocks have an empty name
-        let s = elem.data.to_string();
-        if !s.is_empty() {
-            Some(s)
-        } else {
-            None
-        }
-    });
-    let fqn = once(crate_name).chain(relative).collect();
+    let fqn = def_id_to_path(cx, did, None);
     cx.renderinfo.borrow_mut().external_paths.insert(did, (fqn, kind));
 }
 

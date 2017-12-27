@@ -42,7 +42,6 @@ use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
 use rustc::traits;
 use rustc::infer::InferCtxt;
-use rustc::infer::outlives::env::OutlivesEnvironment;
 use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
@@ -51,7 +50,7 @@ use std::collections::hash_map::Entry;
 use rustc_const_math::ConstInt;
 use std::default::Default;
 use std::{mem, slice, vec};
-use std::iter::FromIterator;
+use std::iter::{FromIterator, once};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::u32;
@@ -2709,6 +2708,43 @@ impl Clean<PathSegment> for hir::PathSegment {
     }
 }
 
+fn strip_type(ty: Type) -> Type {
+    match ty {
+        Type::ResolvedPath { path, typarams, did, is_generic } => {
+            Type::ResolvedPath { path: strip_path(&path), typarams, did, is_generic }
+        },
+        Type::Tuple(inner_tys) => {
+            Type::Tuple(inner_tys.iter().map(|t| strip_type(t.clone())).collect())
+        },
+        Type::Slice(inner_ty) => Type::Slice(Box::new(strip_type(*inner_ty))),
+        Type::Array(inner_ty, s) => Type::Array(Box::new(strip_type(*inner_ty)), s),
+        Type::Unique(inner_ty) => Type::Unique(Box::new(strip_type(*inner_ty))),
+        Type::RawPointer(m, inner_ty) => Type::RawPointer(m, Box::new(strip_type(*inner_ty))),
+        Type::BorrowedRef { lifetime, mutability, type_ } => {
+            Type::BorrowedRef { lifetime, mutability, type_: Box::new(strip_type(*type_)) }
+        },
+        Type::QPath { name, self_type, trait_ } => {
+            Type::QPath { name, self_type: Box::new(strip_type(*self_type)), trait_: Box::new(strip_type(*trait_)) }
+        },
+        _ => ty
+    }
+}
+
+fn strip_path(path: &Path) -> Path {
+    let segments = path.segments.iter().map(|s| {
+        PathSegment {
+            name: s.name.clone(),
+            params: PathParameters::AngleBracketed { lifetimes: Vec::new(), types: Vec::new(), bindings: Vec::new() }
+        }
+    }).collect();
+
+    Path {
+        global: path.global,
+        def: path.def.clone(),
+        segments
+    }
+}
+
 fn qpath_to_string(p: &hir::QPath) -> String {
     let segments = match *p {
         hir::QPath::Resolved(_, ref path) => &path.segments,
@@ -3386,6 +3422,12 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     pub fn get_with_node_id(&self, id: ast::NodeId) -> Vec<Item> {
         let item = &self.cx.tcx.hir.expect_item(id).node;
+        let did = self.cx.tcx.hir.local_def_id(id);
+
+        if self.cx.tcx.get_attrs(did).lists("doc").has_word("hidden") {
+            debug!("get_wth_node_id(id={:?}): item has doc('hidden'), aborting", id);
+            return Vec::new()
+        }
 
         let def_ctor = match *item {
             hir::ItemStruct(_, _) => Def::Struct,
@@ -3394,10 +3436,11 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             _ => panic!("Unexpected type {:?} {:?}", item, id)
         };
 
-        self.get_auto_trait_impls(self.cx.tcx.hir.local_def_id(id), def_ctor)
+        self.get_auto_trait_impls(did, def_ctor)
     }
 
     pub fn get_auto_trait_impls(&self, def_id: DefId, def_ctor: fn(DefId) -> Def) -> Vec<Item> {
+
         let tcx = self.cx.tcx;
         let generics = self.cx.tcx.generics_of(def_id);
 
@@ -3597,14 +3640,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 infcx.process_registered_region_obligations(&[], None, last_env.clone(), id);
             }
 
-            let region_data = infcx.borrow_region_constraints().region_constraint_data().clone();
-
-            infcx.resolve_regions_and_report_errors(trait_did, &Default::default(), &OutlivesEnvironment::new(last_env));
-
-            let unsolved = infcx.region_obligations.borrow().clone();
-            if !unsolved.is_empty() {
-                panic!("Unsolved: {:?}", unsolved);
-            }
+            let region_data = infcx.take_and_reset_region_constraints();
 
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
 
@@ -3650,8 +3686,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         predicates.extend(param_env.caller_bounds.clone());
 
         for e in errs.iter() {
-            let p = match e.obligation.predicate {
-                Predicate::Trait(p) => p,
+            let substs = match e.obligation.predicate {
+                Predicate::Trait(p) => p.skip_binder().trait_ref.substs,
+                Predicate::Projection(p) => p.skip_binder().projection_ty.substs,
                 _ => panic!("Unexpected predicate {:?}", e.obligation.predicate)
             };
 
@@ -3678,7 +3715,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             //
             //
 
-            let params = self.type_vars_from_predicate(p.skip_binder());
+            let params = self.type_vars_from_substs(substs);
 
             if params.is_none() {
                 return Err(Some(e.obligation.predicate))
@@ -3689,8 +3726,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         return Ok(Some(ty::ParamEnv::new(&tcx.intern_predicates(&tcx.lift_to_global(&predicates).unwrap()), param_env.reveal)));
     }
 
-    fn type_vars_from_predicate(&self, p: &TraitPredicate) -> Option<Vec<ty::ParamTy>> {
-        let substs = p.trait_ref.substs;
+    fn type_vars_from_substs(&self, substs: &Substs) -> Option<Vec<ty::ParamTy>> {
         let params: Option<Vec<_>> = substs.types().map(|t| {
             match &t.sty {
                 &ty::TyParam(p) => Some(p),
@@ -3844,17 +3880,109 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 
     fn param_env_to_generics(&self, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>) -> Generics {
-        let trait_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
-            match p { &Predicate::Trait(ref pred) => Some(pred), _ => None  }
+
+        debug!("param_env_to_generics(did={:?}, param_env={:?}, type_generics={:?}, existing_predicates={:?})", did, param_env, type_generics, existing_predicates);
+
+        let test_where_predicates = param_env.caller_bounds.iter().map(|p| p.clean(self.cx));
+        //let ty_params: Vec<TyParam> = type_generics.types.iter().map(|t| t.clean(self.cx)).collect();
+
+        // The `Sized` trait must be handled specially, since we only only display it when
+        // it is *not* required (i.e. '?Sized')
+        let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
+
+        let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
+        let Generics { params: generic_params, where_predicates: old_where_predicates } = full_generics.clean(self.cx);
+
+        let mut old_where_predicates = FxHashSet::from_iter(old_where_predicates.into_iter());
+
+        let mut has_sized = FxHashSet();
+        let mut ty_to_bounds = FxHashMap();
+        let mut lifetime_to_bounds = FxHashMap();
+
+        // Remove all generic parameters from trait bounds.
+        // If there's a bound in the original type that looks like
+        // `T: Iterator<Item=u8>`, we don't want to display any
+        // `Iterator` bounds in the generated impl, since it doesn't
+        // add any new imformation for the user
+        let temp_preds = old_where_predicates.iter().flat_map(|p| 
+            match p {
+                &WherePredicate::BoundPredicate { ref ty, ref bounds } => {
+                    Some(WherePredicate::BoundPredicate {
+                        ty: ty.clone(),
+                        bounds: bounds.iter().flat_map(|bound| {
+                            match bound {
+                                &TyParamBound::TraitBound(ref trait_, modifier) => {
+                                    let cleaned = strip_type(trait_.trait_.clone());
+                                    println!("Adding clean trait bound {:?} for {:?}", cleaned, did);
+                                    Some(TyParamBound::TraitBound(PolyTrait {
+                                        trait_: cleaned,
+                                        generic_params: Vec::new()
+                                    }, modifier))
+                                },
+                                _ => None
+                            }
+                        }).collect()
+                    })
+                },
+                &WherePredicate::EqPredicate { .. } => { println!("Eq predicate: {:?} {:?}", did, p);  None },
+                _ => None
+            }
+        ).collect::<FxHashSet<WherePredicate>>();
+
+        old_where_predicates.extend(temp_preds);
+
+        test_where_predicates.filter(|p| !old_where_predicates.contains(p)).for_each(|p| match p {
+            WherePredicate::BoundPredicate { ty, bounds } => {
+                if bounds.is_empty() {
+                   return;
+                }
+
+                let mut new_bounds: Vec<TyParamBound> = bounds.into_iter().flat_map(|b| {
+
+                    if b.is_sized_bound(self.cx) {
+                        has_sized.insert(ty.clone());
+                        return None;
+                    }
+                    return Some(b);
+                }).collect();
+
+                ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).extend(new_bounds);
+            },
+            WherePredicate::RegionPredicate { lifetime, bounds } => {
+                lifetime_to_bounds.entry(lifetime).or_insert_with(|| FxHashSet()).extend(bounds);
+            }
+            WherePredicate::EqPredicate { ..} => {} // TODO
+        });
+
+        let final_predicates = ty_to_bounds.into_iter().map(|(ty, mut bounds)| {
+            if !has_sized.contains(&ty) {
+                bounds.insert(TyParamBound::maybe_sized(self.cx));
+            }
+            WherePredicate::BoundPredicate { ty, bounds: bounds.into_iter().collect() }
+        }).chain(lifetime_to_bounds.into_iter().map(|(lifetime, bounds)| {
+            WherePredicate::RegionPredicate { lifetime, bounds : bounds.into_iter().collect() }
+        }));
+
+        existing_predicates.extend(final_predicates);
+
+
+        Generics {
+            params: generic_params,
+            where_predicates: existing_predicates
+        }
+
+
+
+        /*let trait_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
+            match p { &Predicate::Trait(ref pred) => Some(pred), _ => panic!("Unknown predicate {:?} for type {:?}", p, did) }
         }).collect();
 
         let outlives_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
             match p { &Predicate::TypeOutlives(ref pred) => Some(pred), _ => None  }
-        }).collect();
+        }).collect();*/
 
-        let ty_params: Vec<TyParam> = type_generics.types.iter().map(|t| t.clean(self.cx)).collect();
 
-        let mut bounds_map = FxHashMap();
+        /*let mut bounds_map = FxHashMap();
         for p in ty_params.iter() {
             bounds_map.insert(p.name.clone(), FxHashSet::from_iter(p.bounds.iter().map(|b| SimpleBound::from(b.clone()))));
         }
@@ -3879,11 +4007,13 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             preds.insert(ty::Binder(Predicate::TypeOutlives(**pred)));
         }
 
-        // The `Sized` trait must be handled specially, since we only only display it when
-        // it is *not* required (i.e. '?Sized')
-        let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
 
-        existing_predicates.extend((&var_to_predicates).iter().flat_map(|(name, preds)| {
+        let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
+        let Generics { params: generic_params, where_predicates } = full_generics.clean(self.cx);
+
+        let old_where_predicates = FxHashSet::from_iter(where_predicates.into_iter());
+
+        let new_predicates = (&var_to_predicates).iter().flat_map(|(name, preds)| {
 
             let mut has_sized_bound = false;
             let existing_bounds = bounds_map.get(&*name.as_str()).unwrap();
@@ -3921,7 +4051,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         is_generic: false
                     },
                     generic_params: Vec::new()
-                }, hir::TraitBoundModifier::None));
+                }, hir::TraitBoundModifier::Maybe));
             }
 
             if bounds.is_empty() {
@@ -3939,16 +4069,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             };
 
             Some(where_predicate)
-        }));
+        }).filter(|p| {
+            !where_predicates.contains(p)
+        });*/
 
-        let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
-
-        let Generics { params: generic_params, .. } = full_generics.clean(self.cx);
-
-        Generics {
-            params: generic_params,
-            where_predicates: existing_predicates
-        }
     }
 
     fn next_def_id(&self, crate_num: CrateNum) -> DefId {
@@ -3977,6 +4101,21 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         def_id.clone()
     }
+}
+
+
+pub fn def_id_to_path(cx: &DocContext, did: DefId, name: Option<String>) -> Vec<String> {
+    let crate_name = name.unwrap_or_else(|| cx.tcx.crate_name(did.krate).to_string());
+    let relative = cx.tcx.def_path(did).data.into_iter().filter_map(|elem| {
+        // extern blocks have an empty name
+        let s = elem.data.to_string();
+        if !s.is_empty() {
+            Some(s)
+        } else {
+            None
+        }
+    });
+    once(crate_name).chain(relative).collect()
 }
 
 

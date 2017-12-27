@@ -37,7 +37,7 @@ pub use self::ExternalLocation::*;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::default::Default;
 use std::error;
 use std::fmt::{self, Display, Formatter, Write as FmtWrite};
@@ -294,6 +294,18 @@ pub struct Cache {
     /// generating explicit hyperlinks to other crates.
     pub external_paths: FxHashMap<DefId, (Vec<String>, ItemType)>,
 
+    /// Maps local def ids of exported types to fully qualified paths.
+    /// Unlike 'paths', this mapping ignores any renames that occur
+    /// due to 'use' statements.
+    ///
+    /// This map is used when writing out the special 'implementors'
+    /// javascript file. By using the exact path that the type
+    /// is declared with, we ensure that each path will be identical
+    /// to the path used if the corresponding type is inlined. By
+    /// doing this, we can detect duplicate impls on a trait page, and only display
+    /// the impl for the inlined type.
+    pub exact_paths: FxHashMap<DefId, Vec<String>>,
+
     /// This map contains information about all known traits of this crate.
     /// Implementations of a crate should inherit the documentation of the
     /// parent trait if no extra documentation is specified, and default methods
@@ -341,6 +353,7 @@ pub struct Cache {
     // yet when its implementation methods are being indexed. Caches such methods
     // and their parent id here and indexes them at the end of crate parsing.
     orphan_impl_items: Vec<(DefId, clean::Item)>,
+    inlined: FxHashSet<DefId>
 }
 
 /// Temporary storage for data obtained during `RustdocVisitor::clean()`.
@@ -350,6 +363,7 @@ pub struct RenderInfo {
     pub inlined: FxHashSet<DefId>,
     pub external_paths: ::core::ExternalPaths,
     pub external_typarams: FxHashMap<DefId, String>,
+    pub exact_paths: FxHashMap<DefId, Vec<String>>,
     pub deref_trait_did: Option<DefId>,
     pub deref_mut_trait_did: Option<DefId>,
     pub owned_box_did: Option<DefId>,
@@ -600,9 +614,10 @@ pub fn run(mut krate: clean::Crate,
 
     // Crawl the crate to build various caches used for the output
     let RenderInfo {
-        inlined: _,
+        inlined,
         external_paths,
         external_typarams,
+        exact_paths,
         deref_trait_did,
         deref_mut_trait_did,
         owned_box_did,
@@ -616,6 +631,7 @@ pub fn run(mut krate: clean::Crate,
         impls: FxHashMap(),
         //synthetic_impls: FxHashMap()
         external_paths,
+        exact_paths,
         paths: FxHashMap(),
         implementors: FxHashMap(),
         //synthetic_implementors: FxHashMap()
@@ -635,6 +651,7 @@ pub fn run(mut krate: clean::Crate,
         owned_box_did,
         masked_crates: mem::replace(&mut krate.masked_crates, FxHashSet()),
         typarams: external_typarams,
+        inlined,
     };
 
     // Cache where all our extern crates are located
@@ -977,7 +994,7 @@ fn write_shared(cx: &Context,
     for (&did, imps) in &cache.implementors {
         // Private modules can leak through to this phase of rustdoc, which
         // could contain implementations for otherwise private types. In some
-        // rare cases we could find an implementation for an item which wasn't
+        // rare cases we could find an implementamplem`tion for an item which wasn't
         // indexed, so we just skip this step in that case.
         //
         // FIXME: this is a vague explanation for why this can't be a `get`, in
@@ -1002,7 +1019,7 @@ fn write_shared(cx: &Context,
             // should add it.
             if !imp.impl_item.def_id.is_local() { continue }
             have_impls = true;
-            write!(implementors, "{{text:{},synthetic:{}}},", as_json(&imp.inner_impl().to_string()), imp.inner_impl().synthetic).unwrap();
+            write!(implementors, "{{text:{},synthetic:{},types:{}}},", as_json(&imp.inner_impl().to_string()), imp.inner_impl().synthetic, as_json(&collect_paths_for_type(imp.inner_impl().for_.clone()))).unwrap();
         }
         implementors.push_str("];");
 
@@ -2710,17 +2727,30 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
             write!(w, "</ul>")?;
         }
 
+        write!(w, r#"<script type="text/javascript">
+               window.inlined_types=new Set();"#)?;
+        for did in local.into_iter().flat_map(|i| i.inner_impl().for_.def_id()) {
+            if cache.inlined.contains(&did) {
+                let path = cache.external_paths[&did].0.clone().join("::");
+                write!(w, "window.inlined_types.add({});", as_json(&path))?;
+            }
+        }
+        write!(w, r#"</script>"#)?;
+
     } else {
         // even without any implementations to write in, we still want the heading and list, so the
         // implementors javascript file pulled in below has somewhere to write the impls into
         write!(w, "{}", impl_header)?;
         write!(w, "</ul>")?;
+        
+        write!(w, r#"<script type="text/javascript">window.inlined_types=new Set();</script>"#)?;
 
         if t.auto {
             write!(w, "{}", synthetic_impl_header)?;
             write!(w, "</ul>")?;
         }
     }
+                 
     write!(w, r#"<script type="text/javascript" async
                          src="{root_path}/implementors/{path}/{ty}.{name}.js">
                  </script>"#,
@@ -4257,6 +4287,69 @@ fn get_index_type(clean_type: &clean::Type) -> Type {
         generics: get_generics(clean_type),
     };
     t
+}
+
+/// Returns a list of all paths used in the type.
+/// This is used to help deduplicate imported impls
+/// for reexported types. If any of the contained
+/// types are re-exported, we don't use the corresponding
+/// entry from the js file, as inlining will have already
+/// picked up the impl
+fn collect_paths_for_type(first_ty: clean::Type) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut visited = FxHashSet();
+    let mut work = VecDeque::new();
+    let cache = cache();
+
+    work.push_back(first_ty);
+
+    while let Some(ty) = work.pop_front() {
+        if !visited.insert(ty.clone()) {
+            continue;
+        }
+
+        match ty {
+            clean::Type::ResolvedPath { did, .. } => {
+                let get_extern = || cache.external_paths.get(&did).map(|s| s.0.clone());
+                let fqp = cache.exact_paths.get(&did).cloned().or_else(get_extern);
+
+                match fqp {
+                    Some(path) => {
+                        out.push(path.join("::"));
+                    },
+                    _ => {}
+                };
+
+               // out.push(href(did).unwrap().
+                //let names: Vec<String> = path.segments.into_iter().map(|s| s.name).collect();
+                //out.push(names.join("::"));
+            },
+            clean::Type::Tuple(tys) => {
+                work.extend(tys.into_iter());
+            },
+            clean::Type::Slice(ty) => {
+                work.push_back(*ty);
+            }
+            clean::Type::Array(ty, _) => {
+                work.push_back(*ty);
+            },
+            clean::Type::Unique(ty) => {
+                work.push_back(*ty);
+            },
+            clean::Type::RawPointer(_, ty) => {
+                work.push_back(*ty);
+            },
+            clean::Type::BorrowedRef { type_, .. } => {
+                work.push_back(*type_);
+            },
+            clean::Type::QPath { self_type, trait_, .. } => {
+                work.push_back(*self_type);
+                work.push_back(*trait_);
+            },
+            _ => {}
+        }
+    };
+    out
 }
 
 fn get_index_type_name(clean_type: &clean::Type, accept_generic: bool) -> Option<String> {

@@ -45,6 +45,7 @@ pub type ExternalPaths = FxHashMap<DefId, (Vec<String>, clean::TypeKind)>;
 
 pub struct DocContext<'a, 'tcx: 'a> {
     pub tcx: TyCtxt<'a, 'tcx, 'tcx>,
+    pub crate_name: Option<String>,
     pub cstore: Rc<CrateStore>,
     pub populated_all_crate_impls: Cell<bool>,
     // Note that external items for which `doc(hidden)` applies to are shown as
@@ -218,6 +219,7 @@ pub fn run_core(search_paths: SearchPaths,
 
         let ctxt = DocContext {
             tcx,
+            crate_name,
             cstore: cstore.clone(),
             populated_all_crate_impls: Cell::new(false),
             access_levels: RefCell::new(access_levels),
