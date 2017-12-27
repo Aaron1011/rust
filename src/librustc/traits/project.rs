@@ -1591,6 +1591,10 @@ impl<'tcx> ProjectionCache<'tcx> {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.map.clear();
+    }
+
     pub fn snapshot(&mut self) -> ProjectionCacheSnapshot {
         ProjectionCacheSnapshot { snapshot: self.map.snapshot() }
     }

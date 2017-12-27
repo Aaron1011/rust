@@ -1561,13 +1561,13 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
             |c| c.as_mut().expect("region constraints already solved"))
     }
 
-    /// Clears the selection and evaluation caches, while
-    /// leaving all other caches untouched. This is useful when
-    /// repeatedly attemping to select an Obligation while chaning only
-    /// its ParamEnv.
+    /// Clears the selection, evaluation, and projection cachesThis is useful when
+    /// repeatedly attemping to select an Obligation while chagning only
+    /// its ParamEnv, since FulfillmentContext doesn't use 'probe'
     pub fn clear_caches(&self) {
         self.selection_cache.clear();
         self.evaluation_cache.clear();
+        self.projection_cache.borrow_mut().clear();
     }
 }
 
