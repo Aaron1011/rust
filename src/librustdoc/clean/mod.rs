@@ -877,6 +877,14 @@ impl TyParamBound {
         }
         false
     }
+
+    fn get_trait_type(&self) -> Option<Type> {
+
+        if let TyParamBound::TraitBound(PolyTrait { ref trait_, .. }, _) = *self {
+            return Some(trait_.clone());
+        }
+        None
+    }
 }
 
 impl Clean<TyParamBound> for hir::TyParamBound {
@@ -3930,12 +3938,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
 
 
-		/*let sized_predicate = ty::Binder(ty::TraitRef {
-			def_id: sized_trait.clone(),
-			substs: self.cx.tcx.mk_substs_trait(ty, &[])
-		}).to_predicate();*/
-
-
         let orig_bounds: FxHashSet<_> = self.cx.tcx.param_env(did).caller_bounds.iter().collect();
         let test_where_predicates = param_env.caller_bounds.iter().filter(|p| {
             !orig_bounds.contains(p) || match p {
@@ -3965,42 +3967,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let mut old_where_predicates = FxHashSet::from_iter(old_where_predicates.into_iter());
 
 
-
         let mut has_sized = FxHashSet();
-        let mut to_to_traits = FxHashMap();
+        let mut ty_to_bounds = FxHashMap();
         let mut lifetime_to_bounds = FxHashMap();
-
-        // Remove all generic parameters from trait bounds.
-        // If there's a bound in the original type that looks like
-        // `T: Iterator<Item=u8>`, we don't want to display any
-        // `Iterator` bounds in the generated impl, since it doesn't
-        // add any new imformation for the user
-        /*let temp_preds = old_where_predicates.iter().flat_map(|p| 
-            match p {
-                &WherePredicate::BoundPredicate { ref ty, ref bounds } => {
-                    Some(WherePredicate::BoundPredicate {
-                        ty: ty.clone(),
-                        bounds: bounds.iter().flat_map(|bound| {
-                            match bound {
-                                &TyParamBound::TraitBound(ref trait_, modifier) => {
-                                    let cleaned = strip_type(trait_.trait_.clone());
-                                    println!("Adding clean trait bound {:?} for {:?}", cleaned, did);
-                                    Some(TyParamBound::TraitBound(PolyTrait {
-                                        trait_: cleaned,
-                                        generic_params: Vec::new()
-                                    }, modifier))
-                                },
-                                _ => None
-                            }
-                        }).collect()
-                    })
-                },
-                &WherePredicate::EqPredicate { .. } => { println!("Eq predicate: {:?} {:?}", did, p);  None },
-                _ => None
-            }
-        ).collect::<FxHashSet<WherePredicate>>();
-
-        old_where_predicates.extend(temp_preds);*/
+        let mut ty_to_traits: FxHashMap<Type, FxHashSet<Type>> = FxHashMap();
 
         test_where_predicates/*.filter(|p| !old_where_predicates.contains(p))*/.for_each(|p| match p {
             WherePredicate::BoundPredicate { ty, bounds } => {
@@ -4014,6 +3984,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         has_sized.insert(ty.clone());
                         return None;
                     }
+
+                    // If we've already added a projection bound for the same type, don't add
+                    // this, as it would be a duplicate
+                    if b.get_trait_type().and_then(|t| ty_to_traits.get(&ty).map(|bounds| bounds.contains(&strip_type(t.clone())))).unwrap_or(false) {
+                        return None
+                    }
+
+
                     return Some(b);
                 }).collect();
 
@@ -4045,11 +4023,22 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                     }
                                 }
 
-                                ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(TyParamBound::TraitBound(PolyTrait {
+
+                                let bounds = ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashSet());
+                                
+                                bounds.insert(TyParamBound::TraitBound(PolyTrait {
                                     trait_: Type::ResolvedPath { path: new_trait_path, typarams: typarams.clone(), did: did.clone(), is_generic: *is_generic },
                                     generic_params: Vec::new()
 
                                 }, hir::TraitBoundModifier::None));
+
+                                // Remove any existing 'plain' bound (e.g. 'T: Iterator`) so that
+                                // we don't see a duplicate bound like `T: Iterator + Iterator<Item=u8>`
+                                // on the docs page.
+                                bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
+                                // Avoid creating any new duplicate bounds
+                                ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
+
                             },
                             _ => panic!("Unexpected trait {:?} for {:?}", trait_, did)
                         }
@@ -4076,108 +4065,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             params: generic_params,
             where_predicates: existing_predicates
         }
-
-
-
-        /*let trait_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
-            match p { &Predicate::Trait(ref pred) => Some(pred), _ => panic!("Unknown predicate {:?} for type {:?}", p, did) }
-        }).collect();
-
-        let outlives_predicates: Vec<_> = param_env.caller_bounds.iter().flat_map(|p| {
-            match p { &Predicate::TypeOutlives(ref pred) => Some(pred), _ => None  }
-        }).collect();*/
-
-
-        /*let mut bounds_map = FxHashMap();
-        for p in ty_params.iter() {
-            bounds_map.insert(p.name.clone(), FxHashSet::from_iter(p.bounds.iter().map(|b| SimpleBound::from(b.clone()))));
-        }
-
-
-        let mut var_to_predicates = FxHashMap();
-
-        for pred in trait_predicates.iter() {
-            let type_vars = self.all_type_vars(pred.skip_binder());
-            for type_var in type_vars.iter() {
-                let preds = var_to_predicates.entry(type_var.name).or_insert_with(|| FxHashSet());
-                preds.insert(ty::Binder(Predicate::Trait(**pred)));
-            }
-        }
-
-        for pred in outlives_predicates.iter() {
-            let type_var = match pred.skip_binder().0.sty {
-                ty::TyParam(p) => p,
-                _ => panic!("Unexpected type '{:?}' '{:?}'", pred, outlives_predicates)
-            };
-            let preds = var_to_predicates.entry(type_var.name).or_insert_with(|| FxHashSet());
-            preds.insert(ty::Binder(Predicate::TypeOutlives(**pred)));
-        }
-
-
-        let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
-        let Generics { params: generic_params, where_predicates } = full_generics.clean(self.cx);
-
-        let old_where_predicates = FxHashSet::from_iter(where_predicates.into_iter());
-
-        let new_predicates = (&var_to_predicates).iter().flat_map(|(name, preds)| {
-
-            let mut has_sized_bound = false;
-            let existing_bounds = bounds_map.get(&*name.as_str()).unwrap();
-
-            let mut bounds: Vec<_> = preds.iter().flat_map(|pred| {
-                let bound = match pred.skip_binder() {
-                    &Predicate::Trait(p) => {
-                        if p.def_id() == sized_trait {
-                            has_sized_bound = true;
-                            return None // Positive bounds on 'Sized' are the default, so we don't display them
-                        }
-
-                        p.skip_binder().trait_ref.clean(self.cx)
-                    },
-                    &Predicate::TypeOutlives(p) => {
-                        TyParamBound::RegionBound(p.skip_binder().1.clean(self.cx).unwrap())
-                        //Some(TyParamBound::RegionTyParamBound(lifetime_names.get(&self.region_name(p.skip_binder().1).unwrap_or_else(|| panic!("Region has no name: '{:?}' '{:?}' '{:?}' '{:?}'", p, preds, ty, param_env))).expect("Missing lifetime for name!!!").lifetime))
-
-                    }
-                    _ => panic!("Unexpected predicate '{:?}' '{:?}'", pred, var_to_predicates)
-                };
-
-                if !existing_bounds.contains(&SimpleBound::from(bound.clone())) {
-                    return Some(bound)
-                }
-                return None
-            }).collect();
-
-            if !has_sized_bound {
-                bounds.push(TyParamBound::TraitBound(PolyTrait {
-                    trait_: Type::ResolvedPath {
-                        path: get_path_for_type(self.cx.tcx, sized_trait, hir::def::Def::Trait).clean(self.cx),
-                        typarams: None,
-                        did: self.next_def_id(did.krate),
-                        is_generic: false
-                    },
-                    generic_params: Vec::new()
-                }, hir::TraitBoundModifier::Maybe));
-            }
-
-            if bounds.is_empty() {
-                return None
-            }
-
-            let where_predicate = WherePredicate::BoundPredicate {
-                ty: Type::ResolvedPath {
-                    path: Path::singleton(name.as_str().to_string()),
-                    typarams: None,
-                    did: self.next_def_id(did.krate),
-                    is_generic: false
-                },
-                bounds
-            };
-
-            Some(where_predicate)
-        }).filter(|p| {
-            !where_predicates.contains(p)
-        });*/
 
     }
 
