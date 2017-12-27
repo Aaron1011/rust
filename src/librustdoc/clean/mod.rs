@@ -3424,10 +3424,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let item = &self.cx.tcx.hir.expect_item(id).node;
         let did = self.cx.tcx.hir.local_def_id(id);
 
-        if self.cx.tcx.get_attrs(did).lists("doc").has_word("hidden") {
-            debug!("get_wth_node_id(id={:?}): item has doc('hidden'), aborting", id);
-            return Vec::new()
-        }
 
         let def_ctor = match *item {
             hir::ItemStruct(_, _) => Def::Struct,
@@ -3440,6 +3436,11 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 
     pub fn get_auto_trait_impls(&self, def_id: DefId, def_ctor: fn(DefId) -> Def) -> Vec<Item> {
+
+        if self.cx.tcx.get_attrs(def_id).lists("doc").has_word("hidden") {
+            debug!("get_auto_trait_impls(def_id={:?}, def_ctor={:?}): item has doc('hidden'), aborting", def_id, def_ctor);
+            return Vec::new()
+        }
 
         let tcx = self.cx.tcx;
         let generics = self.cx.tcx.generics_of(def_id);
