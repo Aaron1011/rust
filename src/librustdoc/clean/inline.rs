@@ -125,6 +125,10 @@ pub fn load_attrs(cx: &DocContext, did: DefId) -> clean::Attributes {
 /// These names are used later on by HTML rendering to generate things like
 /// source links back to the original item.
 pub fn record_extern_fqn(cx: &DocContext, did: DefId, kind: clean::TypeKind) {
+    if did.is_local() {
+        debug!("record_extern_fqn(did={:?}, kind+{:?}): def_id is local, aborting", did, kind);
+        return;
+    }
     let fqn = def_id_to_path(cx, did, None);
     cx.renderinfo.borrow_mut().external_paths.insert(did, (fqn, kind));
 }
