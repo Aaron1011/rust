@@ -3635,17 +3635,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 None => return AutoTraitResult::NegativeImpl
             };
 
-            /*while result.ok().map_or(false, |o| o.is_some()) {
-                last_env = result.ok().unwrap().unwrap();
-                result = self.evaluate_predicates(&mut infcx, trait_did, ty, result.ok().unwrap().unwrap());
-                infcx.clear_caches();
-            }
-
-            if result.err().is_some() {
-                return AutoTraitResult::NegativeImpl
-            }*/
-
-            //let last_env = self.minimize_param_env(new_env.unwrap(), ty, trait_did, &mut infcx);
+            let mut fulfill = FulfillmentContext::new();
+            fulfill.register_bound(&infcx, new_env.clone(), ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
+            fulfill.select_all_or_error(&infcx).unwrap_or_else(|e| panic!("Unable to fulfill trait {:?} for '{:?}': {:?}", trait_did, ty, e));
 
             let names_map: FxHashMap<String, Lifetime> = generics.regions.iter().map(|l|  {
                     (l.name.as_str().to_string(), l.clean(self.cx))
@@ -3669,81 +3661,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     }
 
-    /// Attempts to remove any unecessary bounds which were added to the param env.
-    /// Due to how trait selection works, `find_auto_trait_generics` can end up
-    /// computing overly restrictive bounds.
-    ///
-    /// For example, consider the bound `T: IntoIterator`
-    fn minimize_param_env<'b, 'gcx, 'c>(&self, param_env: ty::ParamEnv<'c>, ty: ty::Ty<'c>, trait_did: DefId, infcx: &mut InferCtxt<'b, 'tcx, 'c>) -> ty::ParamEnv<'c> {
-        let tcx = infcx.tcx;
-
-        let mut final_preds = Vec::with_capacity(param_env.caller_bounds.len());
-        let mut orig_preds = Vec::with_capacity(param_env.caller_bounds.len());
-        let mut derived_preds = Vec::new();
-        
-        for pred in param_env.caller_bounds.iter() {
-            orig_preds.push(pred.clone());
-            match pred {
-                &ty::Predicate::Projection(project) => {
-                    let project = project.skip_binder();
-                    let trait_bound = tcx.associated_item(project.projection_ty.item_def_id).container.assert_trait();
-
-                    let new_pred = ty::Predicate::Trait(ty::Binder(ty::TraitPredicate {
-                        trait_ref: ty::TraitRef {
-                            def_id: trait_bound,
-                            substs: project.projection_ty.substs
-                        }
-                    }));
-
-                    derived_preds.push(new_pred);
-                },
-                _ => {}
-            }
-        }
-
-        let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
-        let dummy_ob = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
-
-        for pred in orig_preds.clone() {
-
-            match &pred {
-                &ty::Predicate::Trait(ty::Binder(ty::TraitPredicate { trait_ref: ty::TraitRef { def_id, .. } })) => {
-                    if def_id == sized_trait {
-                        // We always keep sized predicates, since they would incorrectly
-                        // be marked as unecessary by code below
-                        final_preds.push(pred);
-                        continue;
-                    }
-                },
-                _ => {}
-            }
-
-            infcx.clear_caches();
-            let mut fulfill = traits::FulfillmentContext::new();
-            let preds_without: Vec<_> = orig_preds.clone().into_iter().chain(derived_preds.clone().into_iter()).filter(|other_pred| *other_pred != pred).collect();
-
-            let new_param_env = ty::ParamEnv {
-                caller_bounds: &tcx.intern_predicates(&tcx.lift_to_global(&preds_without).unwrap()),
-                reveal: param_env.reveal
-            };
-
-            fulfill.register_bound(&infcx, new_param_env, ty, trait_did, dummy_ob.clone());
-
-
-            // If selection would err without this predicate, keep it
-            let result = fulfill.select_all_or_error(&infcx);
-
-            if result.is_err() {
-                final_preds.push(pred);
-            }
-        }
-
-        ty::ParamEnv {
-            caller_bounds: &tcx.intern_predicates(&tcx.lift_to_global(&final_preds).unwrap()),
-            reveal: param_env.reveal
-        }
-    }
-
     fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>) -> Option<ty::ParamEnv<'c>> {
         let tcx = infcx.tcx;
 
@@ -3756,7 +3673,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             substs: infcx.tcx.mk_substs_trait(ty, &[]),
         }}));
 
-        let mut computed_preds: FxHashSet<_> = param_env.caller_bounds.iter().map(|p| p.clone()).collect();
+        // Duplicates are fine, as they get removed later
+        let mut computed_preds: Vec<_> = param_env.caller_bounds.iter().map(|p| p.clone()).collect();
 
         let mut new_env = param_env.clone();
 
@@ -3778,7 +3696,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
                                 if self.is_of_param(substs)  {
                                     println!("Final bound for {:?} {:?}", ty, predicate);
-                                    computed_preds.insert(predicate);
+                                    computed_preds.push(predicate);
                                 } else {
                                     println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
                                     predicates.push_back(p.clone());
@@ -3789,7 +3707,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                 // we don't want to add it as a bound
                                 if self.is_of_param(p.skip_binder().projection_ty.substs) {
                                     println!("Final projection bound for {:?} {:?}", ty, p);
-                                    computed_preds.insert(predicate);
+                                    computed_preds.push(predicate);
                                 }
                             },
                             &ty::Predicate::RegionOutlives(_) | &ty::Predicate::TypeOutlives(_) => {
@@ -3797,14 +3715,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                             }
                             _ => panic!("Unexpected predicate {:?} {:?}", ty, predicate)
                         };
-
-                        /*if self.type_vars_from_substs(substs).is_some() {
-                            println!("Final bound for {:?} {:?}", ty, predicate);
-                            computed_preds.push(predicate);
-                        } else {
-                            println!("More processing for {:?} {:?}", ty, predicate);
-                            predicates.push_back(ty::Binder(predicate));
-                        }*/
+                        
                     }
                 },
                 &Ok(None) => {
@@ -3815,19 +3726,12 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     if self.is_of_param(pred.skip_binder().trait_ref.substs) {
                         println!("Creating and reprocessing trait bound {:?} {:?}", ty, pred);
                         already_visited.remove(&pred);
-                        computed_preds.insert(ty::Predicate::Trait(pred.clone()));
+                        computed_preds.push(ty::Predicate::Trait(pred.clone()));
                         predicates.push_back(pred);
                     } else {
                         println!("Unimplemented found, bailing: {:?} {:?} {:?}", ty, pred, pred.skip_binder().trait_ref.substs);
                         return None
                     }
-                        /*&ty::Predicate::Projection(ref p) => {
-                            if self.type_vars_from_substs(p.skip_binder().projection_ty.substs).is_some() {
-                                println!("Creating projection bound {:?} {:?}", ty, pred);
-                                computed_preds.push(pred.clone());
-                            }
-                        },
-                        _ => panic!("Unexpected unimplemented predicate {:?} {:?}", ty, pred)*/
                 },
                 _ => panic!("Unexpected error for '{:?}': {:?}", ty, result)
             };
@@ -3838,93 +3742,31 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         println!("Succeeded with {:?} {:?}", ty, new_env);
 
         return Some(new_env);
-
-        /*let result = select.select(&Obligation::new(ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID), param_env, ty::Binder(ty::TraitPredicate { trait_ref: ty::TraitRef {
-            def_id: trait_did,
-            substs: infcx.tcx.mk_substs_trait(ty, &[]),
-        }})));
-
-        let mut predicates: Vec<Predicate> = Vec::new();
-        predicates.extend(param_env.caller_bounds.clone());
-
-
-        if result.is_err() || result.as_ref().ok().unwrap().is_none() {
-            println!("Doesn't implement: {:?} {:?}", ty, result);
-            return Err(None)
-        }
-
-        /*let errs = result.err().unwrap();
-        let wrong_err = errs.iter().find(|e| {
-            match e.code {
-                CodeSelectionError(ref s_err) => match s_err {
-                    &Unimplemented => false,
-                    _ => true
-                },
-                CodeProjectionError(ref p_err) => match p_err.err {
-                    ty::error::TypeError::Sorts(_) => false,
-                    _ => true
-                },
-                _ => true
-            }
-        });
-
-        match wrong_err {
-            Some(_) => {
-                return Err(None);
-            },
-            _ => {}
-        };*/
-
-
-        let nested = result.ok().unwrap().unwrap().nested_obligations();
-        if nested.is_empty() {
-            println!("No more obligations");
-            return Ok(None)
-        }
-
-        for obligation in result.ok().unwrap().unwrap().nested_obligations() {
-            let substs = match obligation.predicate {
-                Predicate::Trait(p) => p.skip_binder().trait_ref.substs,
-                Predicate::Projection(p) => {
-                    p.skip_binder().projection_ty.substs
-                },
-                _ => panic!("Unexpected predicate {:?} {:?}", ty, obligation.predicate)
-            };
-
-            // If the substs contains something other than a type parameter,
-            // (e.g. a Cell<Foo>), then the FulfillmentContext was unable to find 
-            // a matching impl. In that case, we're done, since the only thing
-            // that we can do is add bounds on type parameters.
-            //
-            // For example, consider the type 'struct MyStruct<T>(T)'.
-            // Let's say that we want to determine when, if at all, it implements `Sync`
-            //
-            // The FulfillmentContext will tell us that it doesn't fulfill
-            // the `Sync` bound, returning us an erroring obligation for the trait ref `T: Sync`.
-            // That trait ref only contains TyParams, which means that it's possible
-            // for MyStruct to implement `Sync` when `T: Sync`. In other words, if a user
-            // creates a MyStruct<u8>, `MyStruct<u8>: Sync` because `u8: Sync`
-            //
-            // For a counter example, consider the type `struct OtherStruct<*const T>(T)`
-            // This time, the FulfillmentContext will tell us that it can't find an impl
-            // for the trait ref `*const T: Sync`. The fact that the TyParam is still enclosed in another
-            // type (a TyRawPtr) means that `*const T: Sync` will *never* be true.
-            // Otherwise, the FulfillmentContext would have found an impl for `*const T:
-            // Sync`, and started processing the nested obligation `T: Sync`
-            //
-            //
-
-            let params = self.type_vars_from_substs(substs);
-
-            if params.is_none() {
-                println!("Could not simplify: {:?} {:?}", ty, substs);
-                return Err(Some(obligation.predicate))
-            }
-
-            predicates.push(obligation.predicate);
-        }
-        return Ok(Some(ty::ParamEnv::new(&tcx.intern_predicates(&tcx.lift_to_global(&predicates).unwrap()), param_env.reveal)));*/
     }
+
+
+    // If the substs contains something other than a type parameter,
+    // (e.g. a Cell<Foo>), then the FulfillmentContext was unable to find 
+    // a matching impl. In that case, we're done, since the only thing
+    // that we can do is add bounds on type parameters.
+    //
+    // For example, consider the type 'struct MyStruct<T>(T)'.
+    // Let's say that we want to determine when, if at all, it implements `Sync`
+    //
+    // The FulfillmentContext will tell us that it doesn't fulfill
+    // the `Sync` bound, returning us an erroring obligation for the trait ref `T: Sync`.
+    // That trait ref only contains TyParams, which means that it's possible
+    // for MyStruct to implement `Sync` when `T: Sync`. In other words, if a user
+    // creates a MyStruct<u8>, `MyStruct<u8>: Sync` because `u8: Sync`
+    //
+    // For a counter example, consider the type `struct OtherStruct<*const T>(T)`
+    // This time, the FulfillmentContext will tell us that it can't find an impl
+    // for the trait ref `*const T: Sync`. The fact that the TyParam is still enclosed in another
+    // type (a TyRawPtr) means that `*const T: Sync` will *never* be true.
+    // Otherwise, the FulfillmentContext would have found an impl for `*const T:
+    // Sync`, and started processing the nested obligation `T: Sync`
+    //
+    //
 
     fn is_of_param(&self, substs: &Substs) -> bool {
         if substs.is_noop() {
@@ -3936,38 +3778,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             ty::TyProjection(p) => self.is_of_param(p.substs),
             _ => false,
         }
-
-        /*for t in substs.types() {
-            for ty in t.walk() {
-                if t.is_primitive_ty {
-                    return false
-                }
-
-                match ty.sty {
-                    ty::TyStr | 
-                    &ty::TyParam(p) => Some(p),
-                    _ => {
-                        None
-                    }
-                }
-            
-            }
-        }
-        true*/
-    }
-
-    fn all_type_vars(&self, p: &TraitPredicate) -> Vec<ty::ParamTy> {
-        let substs = p.trait_ref.substs;
-        let params: Vec<_> = substs.types().flat_map(|t| {
-            match &t.sty {
-                &ty::TyParam(p) => Some(p),
-                _ => {
-                    None
-                }
-            }
-        }).collect();
-
-        return params;
     }
 
     fn get_lifetime(&self, region: Region, names_map: &FxHashMap<String, Lifetime>) -> Lifetime {
