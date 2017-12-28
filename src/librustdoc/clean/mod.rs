@@ -45,7 +45,7 @@ use rustc::infer::InferCtxt;
 use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
-
+use std::collections::VecDeque;
 
 use rustc_const_math::ConstInt;
 use std::default::Default;
@@ -3629,9 +3629,13 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let mut result: Result<Option<ty::ParamEnv>, Option<Predicate>> = Ok(Some(orig_params.clone()));
             let mut last_env = orig_params;
 
-            //println!("Orig params for ty {:?} are {:?}", ty, orig_params);
 
-            while result.ok().map_or(false, |o| o.is_some()) {
+            let new_env = match self.evaluate_predicates(&mut infcx, trait_did, ty, orig_params) {
+                Some(e) => e,
+                None => return AutoTraitResult::NegativeImpl
+            };
+
+            /*while result.ok().map_or(false, |o| o.is_some()) {
                 last_env = result.ok().unwrap().unwrap();
                 result = self.evaluate_predicates(&mut infcx, trait_did, ty, result.ok().unwrap().unwrap());
                 infcx.clear_caches();
@@ -3639,9 +3643,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             if result.err().is_some() {
                 return AutoTraitResult::NegativeImpl
-            }
+            }*/
 
-            let last_env = self.minimize_param_env(last_env, ty, trait_did, &mut infcx);
+            //let last_env = self.minimize_param_env(new_env.unwrap(), ty, trait_did, &mut infcx);
 
             let names_map: FxHashMap<String, Lifetime> = generics.regions.iter().map(|l|  {
                     (l.name.as_str().to_string(), l.clean(self.cx))
@@ -3650,14 +3654,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let body_ids: FxHashSet<_> = infcx.region_obligations.borrow().iter().map(|&(id, _)| id).collect();
 
             for id in body_ids {
-                infcx.process_registered_region_obligations(&[], None, last_env.clone(), id);
+                infcx.process_registered_region_obligations(&[], None, new_env.clone(), id);
             }
 
             let region_data = infcx.take_and_reset_region_constraints();
 
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
 
-            let new_generics = self.param_env_to_generics(did, last_env, generics.clone(), lifetime_predicates);
+            let new_generics = self.param_env_to_generics(did, new_env, generics.clone(), lifetime_predicates);
             debug!("find_auto_trait_generics(ty={:?}, did={:?}): {:?}", ty, did, new_generics);
             return AutoTraitResult::PositiveImpl(new_generics);
 
@@ -3665,6 +3669,11 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     }
 
+    /// Attempts to remove any unecessary bounds which were added to the param env.
+    /// Due to how trait selection works, `find_auto_trait_generics` can end up
+    /// computing overly restrictive bounds.
+    ///
+    /// For example, consider the bound `T: IntoIterator`
     fn minimize_param_env<'b, 'gcx, 'c>(&self, param_env: ty::ParamEnv<'c>, ty: ty::Ty<'c>, trait_did: DefId, infcx: &mut InferCtxt<'b, 'tcx, 'c>) -> ty::ParamEnv<'c> {
         let tcx = infcx.tcx;
 
@@ -3686,7 +3695,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         }
                     }));
 
-                    println!("Creating new predicate for {:?} {:?}", ty, new_pred);
                     derived_preds.push(new_pred);
                 },
                 _ => {}
@@ -3721,16 +3729,12 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             fulfill.register_bound(&infcx, new_param_env, ty, trait_did, dummy_ob.clone());
 
-            println!("Attempting to remove {:?} {:?}", ty, pred);
 
             // If selection would err without this predicate, keep it
             let result = fulfill.select_all_or_error(&infcx);
 
             if result.is_err() {
-                println!("Keeping predicate {:?} {:?} {:?}", ty, pred, result);
                 final_preds.push(pred);
-            } else {
-                println!("Discarding predicate {:?} {:?}", ty, pred);
             }
         }
 
@@ -3740,25 +3744,116 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>) -> Result<Option<ty::ParamEnv<'c>>, Option<Predicate<'c>>> {
+    fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>) -> Option<ty::ParamEnv<'c>> {
         let tcx = infcx.tcx;
-        let mut fulfill = traits::FulfillmentContext::new();
 
-        fulfill.register_bound(&infcx, param_env, ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
+        let mut select = traits::SelectionContext::new(&infcx);
 
-        println!("Starting select: {:?} {:?}", ty, param_env);
-        let result = fulfill.select_all_or_error(&infcx);
-        println!("Finished select: {:?} {:?}", ty, result);
+        let mut already_visited = FxHashSet();
+        let mut predicates = VecDeque::new();
+        predicates.push_back(ty::Binder(ty::TraitPredicate { trait_ref: ty::TraitRef {
+            def_id: trait_did,
+            substs: infcx.tcx.mk_substs_trait(ty, &[]),
+        }}));
+
+        let mut computed_preds: FxHashSet<_> = param_env.caller_bounds.iter().map(|p| p.clone()).collect();
+
+        let mut new_env = param_env.clone();
+
+        while let Some(pred) = predicates.pop_front() {
+            infcx.clear_caches();
+
+            if !already_visited.insert(pred.clone()) {
+                continue;
+            }
+
+            let result = select.select(&Obligation::new(ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID), new_env, pred));
+
+            match &result {
+                &Ok(Some(ref vtable)) => {
+                    for predicate in vtable.clone().nested_obligations().iter().map(|o| o.predicate.clone()) {
+                        match &predicate {
+                            &ty::Predicate::Trait(ref p) => {
+                                let substs = &p.skip_binder().trait_ref.substs;
+
+                                if self.is_of_param(substs)  {
+                                    println!("Final bound for {:?} {:?}", ty, predicate);
+                                    computed_preds.insert(predicate);
+                                } else {
+                                    println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
+                                    predicates.push_back(p.clone());
+                                }
+                            },
+                            &ty::Predicate::Projection(p) => {
+                                // If the projection isn't all type vars, then
+                                // we don't want to add it as a bound
+                                if self.is_of_param(p.skip_binder().projection_ty.substs) {
+                                    println!("Final projection bound for {:?} {:?}", ty, p);
+                                    computed_preds.insert(predicate);
+                                }
+                            },
+                            &ty::Predicate::RegionOutlives(_) | &ty::Predicate::TypeOutlives(_) => {
+                                continue; // These are accounted for in RegionConstraintData
+                            }
+                            _ => panic!("Unexpected predicate {:?} {:?}", ty, predicate)
+                        };
+
+                        /*if self.type_vars_from_substs(substs).is_some() {
+                            println!("Final bound for {:?} {:?}", ty, predicate);
+                            computed_preds.push(predicate);
+                        } else {
+                            println!("More processing for {:?} {:?}", ty, predicate);
+                            predicates.push_back(ty::Binder(predicate));
+                        }*/
+                    }
+                },
+                &Ok(None) => {
+                    println!("Found Ok(None) when evaluating, bailing out {:?} {:?} {:?}", ty, result, pred);
+                    return None;
+                },
+                &Err(SelectionError::Unimplemented) => {
+                    if self.is_of_param(pred.skip_binder().trait_ref.substs) {
+                        println!("Creating and reprocessing trait bound {:?} {:?}", ty, pred);
+                        already_visited.remove(&pred);
+                        computed_preds.insert(ty::Predicate::Trait(pred.clone()));
+                        predicates.push_back(pred);
+                    } else {
+                        println!("Unimplemented found, bailing: {:?} {:?} {:?}", ty, pred, pred.skip_binder().trait_ref.substs);
+                        return None
+                    }
+                        /*&ty::Predicate::Projection(ref p) => {
+                            if self.type_vars_from_substs(p.skip_binder().projection_ty.substs).is_some() {
+                                println!("Creating projection bound {:?} {:?}", ty, pred);
+                                computed_preds.push(pred.clone());
+                            }
+                        },
+                        _ => panic!("Unexpected unimplemented predicate {:?} {:?}", ty, pred)*/
+                },
+                _ => panic!("Unexpected error for '{:?}': {:?}", ty, result)
+            };
+
+            new_env = ty::ParamEnv::new(&tcx.intern_predicates(&tcx.lift_to_global(&computed_preds).unwrap()), param_env.reveal);
+        }
+
+        println!("Succeeded with {:?} {:?}", ty, new_env);
+
+        return Some(new_env);
+
+        /*let result = select.select(&Obligation::new(ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID), param_env, ty::Binder(ty::TraitPredicate { trait_ref: ty::TraitRef {
+            def_id: trait_did,
+            substs: infcx.tcx.mk_substs_trait(ty, &[]),
+        }})));
 
         let mut predicates: Vec<Predicate> = Vec::new();
         predicates.extend(param_env.caller_bounds.clone());
 
 
-        if result.is_ok() {
-            return Ok(None)
+        if result.is_err() || result.as_ref().ok().unwrap().is_none() {
+            println!("Doesn't implement: {:?} {:?}", ty, result);
+            return Err(None)
         }
 
-        let errs = result.err().unwrap();
+        /*let errs = result.err().unwrap();
         let wrong_err = errs.iter().find(|e| {
             match e.code {
                 CodeSelectionError(ref s_err) => match s_err {
@@ -3775,21 +3870,25 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         match wrong_err {
             Some(_) => {
-                println!("Unexpected error: {:?} {:?} aborting", ty, wrong_err);
                 return Err(None);
             },
             _ => {}
-        };
+        };*/
 
 
-        for e in errs.iter() {
-            let substs = match e.obligation.predicate {
+        let nested = result.ok().unwrap().unwrap().nested_obligations();
+        if nested.is_empty() {
+            println!("No more obligations");
+            return Ok(None)
+        }
+
+        for obligation in result.ok().unwrap().unwrap().nested_obligations() {
+            let substs = match obligation.predicate {
                 Predicate::Trait(p) => p.skip_binder().trait_ref.substs,
                 Predicate::Projection(p) => {
-                    println!("Got projection for {:?} {:?}", ty, e.obligation.predicate);
                     p.skip_binder().projection_ty.substs
                 },
-                _ => panic!("Unexpected predicate {:?}", e.obligation.predicate)
+                _ => panic!("Unexpected predicate {:?} {:?}", ty, obligation.predicate)
             };
 
             // If the substs contains something other than a type parameter,
@@ -3818,27 +3917,43 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let params = self.type_vars_from_substs(substs);
 
             if params.is_none() {
-                return Err(Some(e.obligation.predicate))
+                println!("Could not simplify: {:?} {:?}", ty, substs);
+                return Err(Some(obligation.predicate))
             }
 
-            //println!("Pushing predicate {:?} for ty {:?}", e.obligation.predicate, ty);
-
-            predicates.push(e.obligation.predicate);
+            predicates.push(obligation.predicate);
         }
-        return Ok(Some(ty::ParamEnv::new(&tcx.intern_predicates(&tcx.lift_to_global(&predicates).unwrap()), param_env.reveal)));
+        return Ok(Some(ty::ParamEnv::new(&tcx.intern_predicates(&tcx.lift_to_global(&predicates).unwrap()), param_env.reveal)));*/
     }
 
-    fn type_vars_from_substs(&self, substs: &Substs) -> Option<Vec<ty::ParamTy>> {
-        let params: Option<Vec<_>> = substs.types().map(|t| {
-            match &t.sty {
-                &ty::TyParam(p) => Some(p),
-                _ => {
-                    None
-                }
-            }
-        }).collect();
+    fn is_of_param(&self, substs: &Substs) -> bool {
+        if substs.is_noop() {
+            return false
+        }
 
-        return params;
+        return match substs.type_at(0).sty {
+            ty::TyParam(_) => true,
+            ty::TyProjection(p) => self.is_of_param(p.substs),
+            _ => false,
+        }
+
+        /*for t in substs.types() {
+            for ty in t.walk() {
+                if t.is_primitive_ty {
+                    return false
+                }
+
+                match ty.sty {
+                    ty::TyStr | 
+                    &ty::TyParam(p) => Some(p),
+                    _ => {
+                        None
+                    }
+                }
+            
+            }
+        }
+        true*/
     }
 
     fn all_type_vars(&self, p: &TraitPredicate) -> Vec<ty::ParamTy> {
@@ -3985,7 +4100,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         debug!("param_env_to_generics(did={:?}, param_env={:?}, type_generics={:?}, existing_predicates={:?})", did, param_env, type_generics, existing_predicates);
 
-        println!("Resolved param env: {:?} {:?}", did, param_env);
 
         // The `Sized` trait must be handled specially, since we only only display it when
         // it is *not* required (i.e. '?Sized')
@@ -4014,7 +4128,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
 
 
-        println!("Orig predicates for {:?} are really {:?}", did, old_where_predicates);
 
         let mut old_where_predicates = FxHashSet::from_iter(old_where_predicates.into_iter());
 
@@ -4071,7 +4184,11 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                                 ty: rhs
                                             });
                                         },
-                                        _ => panic!("Unexpected path param {:?} for {:?}", params, did)
+                                        _ => {
+                                            existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
+                                            return // Don't touch things like <T as FnMut>::Output == K
+                                        }
+
                                     }
                                 }
 
@@ -4097,7 +4214,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     },
                     _ => panic!("Unexpected LHS {:?} for {:?}", lhs, did)
                 }
-                println!("EQ PRED: {:?}", did);
             }
         });
 
