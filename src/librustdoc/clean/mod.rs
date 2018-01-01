@@ -46,12 +46,14 @@ use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
+use std::fmt;
 
 use rustc_const_math::ConstInt;
 use std::default::Default;
 use std::{mem, slice, vec};
 use std::iter::{FromIterator, once};
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::u32;
 
@@ -65,6 +67,8 @@ pub mod cfg;
 mod simplify;
 
 use self::cfg::Cfg;
+
+thread_local!(static MAX_DEF_ID: RefCell<FxHashMap<CrateNum, DefId>> = RefCell::new(FxHashMap()));
 
 
 // extract the stability index for a node from tcx, if possible
@@ -287,7 +291,7 @@ impl Clean<ExternalCrate> for CrateNum {
 /// Anything with a source location and set of attributes and, optionally, a
 /// name. That is, anything that can be documented. This doesn't correspond
 /// directly to the AST's concept of an item; it's a strict superset.
-#[derive(Clone, RustcEncodable, RustcDecodable, Debug)]
+#[derive(Clone, RustcEncodable, RustcDecodable)]
 pub struct Item {
     /// Stringified span
     pub source: Span,
@@ -299,6 +303,26 @@ pub struct Item {
     pub def_id: DefId,
     pub stability: Option<Stability>,
     pub deprecation: Option<Deprecation>,
+}
+
+impl fmt::Debug for Item {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+
+        let fake = MAX_DEF_ID.with(|m| m.borrow().get(&self.def_id.krate).map(|id| self.def_id >= *id).unwrap_or(false));
+        println!("Fake: {:?} {:?} {:?}", fake, self.def_id.index, MAX_DEF_ID.with(|m| m.borrow().values().map(|k| k.index.clone()).collect::<Vec<_>>()));
+        let def_id: &fmt::Debug = if fake { &"**FAKE**" } else { &self.def_id };
+        
+        fmt.debug_struct("Item")
+            .field("source", &self.source)
+            .field("name", &self.name)
+            .field("attrs", &self.attrs)
+            .field("inner", &self.inner)
+            .field("visibility", &self.visibility)
+            .field("def_id", def_id)
+            .field("stability", &self.stability)
+            .field("deprecation", &self.deprecation)
+            .finish()
+    }
 }
 
 impl Item {
@@ -3236,7 +3260,11 @@ fn print_const_expr(cx: &DocContext, body: hir::BodyId) -> String {
 fn resolve_type(cx: &DocContext,
                 path: Path,
                 id: ast::NodeId) -> Type {
-    debug!("resolve_type({:?},{:?})", path, id);
+    if id == ast::DUMMY_NODE_ID {
+        debug!("resolve_type({:?})", path);
+    } else {
+        debug!("resolve_type({:?},{:?})", path, id);
+    }
 
     let is_generic = match path.def {
         Def::PrimTy(p) => match p {
@@ -3570,7 +3598,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 name
             }
         }).collect());
-        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.name, cnum))).collect());
+        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.clone(), cnum))).collect());
 
         hir::PathParameters {
             lifetimes: lifetimes,
@@ -3580,13 +3608,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn ty_param_to_ty(&self, name: ast::Name, cnum: CrateNum) -> hir::Ty {
+    fn ty_param_to_ty(&self, param: ty::TypeParameterDef, cnum: CrateNum) -> hir::Ty {
+        debug!("ty_param_to_ty({:?}) {:?}", param, param.def_id);
         hir::Ty {
             id: ast::DUMMY_NODE_ID,
             node: hir::Ty_::TyPath(hir::QPath::Resolved(None, P(hir::Path {
                 span: DUMMY_SP,
-                def: Def::TyParam(self.next_def_id(cnum)),
-                segments: HirVec::from_vec(vec![hir::PathSegment::from_name(name)])
+                def: Def::TyParam(param.def_id),
+                segments: HirVec::from_vec(vec![hir::PathSegment::from_name(param.name)])
             }))),
             span: DUMMY_SP,
             hir_id: hir::DUMMY_HIR_ID
@@ -3630,13 +3659,21 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let mut last_env = orig_params;
 
 
-            let new_env = match self.evaluate_predicates(&mut infcx, trait_did, ty, orig_params) {
+            // We process the param env two times. The first time, we stop and save any 
+            println!("Creating user-displayable param env: {:?} {:?}", ty, trait_did);
+            let new_env = match self.evaluate_predicates(&mut infcx, trait_did, ty, orig_params, true) {
                 Some(e) => e,
                 None => return AutoTraitResult::NegativeImpl
             };
 
+            println!("Creating full param env: {:?} {:?}", ty, trait_did);
+
+            let full_env = self.evaluate_predicates(&mut infcx, trait_did, ty, orig_params, false).unwrap_or_else(|| panic!("Failed to fully process: {:?} {:?} {:?}", ty, trait_did, orig_params));
+
+            println!("Attempting to fulfill for {:?} {:?} {:?}", ty, trait_did, new_env);
+
             let mut fulfill = FulfillmentContext::new();
-            fulfill.register_bound(&infcx, new_env.clone(), ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
+            fulfill.register_bound(&infcx, full_env, ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
             fulfill.select_all_or_error(&infcx).unwrap_or_else(|e| panic!("Unable to fulfill trait {:?} for '{:?}': {:?}", trait_did, ty, e));
 
             let names_map: FxHashMap<String, Lifetime> = generics.regions.iter().map(|l|  {
@@ -3651,6 +3688,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             let region_data = infcx.take_and_reset_region_constraints();
 
+            println!("Handle lifetimes: {:?} {:?}", region_data.constraints, names_map);
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
 
             let new_generics = self.param_env_to_generics(did, new_env, generics.clone(), lifetime_predicates);
@@ -3661,7 +3699,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     }
 
-    fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>) -> Option<ty::ParamEnv<'c>> {
+    fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>, stop_at_param: bool) -> Option<ty::ParamEnv<'c>> {
         let tcx = infcx.tcx;
 
         let mut select = traits::SelectionContext::new(&infcx);
@@ -3694,18 +3732,24 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                             &ty::Predicate::Trait(ref p) => {
                                 let substs = &p.skip_binder().trait_ref.substs;
 
-                                if self.is_of_param(substs)  {
-                                    println!("Final bound for {:?} {:?}", ty, predicate);
-                                    computed_preds.push(predicate);
+                                if stop_at_param {
+                                    if self.is_of_param(substs) {
+                                        println!("Final bound for {:?} {:?}", ty, predicate);
+                                        computed_preds.push(predicate);
+                                    } else {
+                                        println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
+                                        predicates.push_back(p.clone());
+                                    }
                                 } else {
-                                    println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
+                                    println!("Computed and more processing for {:?} {:?}", ty, predicate);
+                                    computed_preds.push(predicate);
                                     predicates.push_back(p.clone());
                                 }
                             },
                             &ty::Predicate::Projection(p) => {
                                 // If the projection isn't all type vars, then
                                 // we don't want to add it as a bound
-                                if self.is_of_param(p.skip_binder().projection_ty.substs) {
+                                if self.is_of_param(p.skip_binder().projection_ty.substs) || !stop_at_param {
                                     println!("Final projection bound for {:?} {:?}", ty, p);
                                     computed_preds.push(predicate);
                                 }
@@ -3723,7 +3767,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     return None;
                 },
                 &Err(SelectionError::Unimplemented) => {
-                    if self.is_of_param(pred.skip_binder().trait_ref.substs) {
+                    if self.is_of_param(pred.skip_binder().trait_ref.substs) || !stop_at_param {
                         println!("Creating and reprocessing trait bound {:?} {:?}", ty, pred);
                         already_visited.remove(&pred);
                         computed_preds.push(ty::Predicate::Trait(pred.clone()));
@@ -3736,7 +3780,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 _ => panic!("Unexpected error for '{:?}': {:?}", ty, result)
             };
 
-            new_env = ty::ParamEnv::new(&tcx.intern_predicates(&tcx.lift_to_global(&computed_preds).unwrap()), param_env.reveal);
+            println!("Lifting predicates: {:?} {:?}", ty, computed_preds);
+            new_env = ty::ParamEnv::new(tcx.mk_predicates(computed_preds.iter()), param_env.reveal);
         }
 
         println!("Succeeded with {:?} {:?}", ty, new_env);
@@ -4048,7 +4093,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     fn next_def_id(&self, crate_num: CrateNum) -> DefId {
 
-        let start_def_id = || {
+        let start_def_id = {
             let next_id = if crate_num == LOCAL_CRATE {
                 self.cx.tcx.hir.definitions().def_path_table().next_id(DefIndexAddressSpace::Low)
             } else {
@@ -4064,11 +4109,17 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         let mut fake_ids = self.cx.fake_def_ids.borrow_mut();
 
-        let def_id = fake_ids.entry(crate_num).or_insert_with(start_def_id).clone();
+        let def_id = fake_ids.entry(crate_num).or_insert(start_def_id).clone();
         fake_ids.insert(crate_num, DefId {
             krate: crate_num,
             index: DefIndex::from_u32(def_id.index.as_u32() + 1)
         });
+
+        MAX_DEF_ID.with(|m| {
+            m.borrow_mut().entry(def_id.krate.clone()).or_insert(start_def_id);
+        });
+
+        self.cx.all_fake_def_ids.borrow_mut().insert(def_id);
 
         def_id.clone()
     }
@@ -4202,7 +4253,8 @@ fn get_path_for_type(tcx: TyCtxt, def_id: DefId, def_ctor: fn(DefId) -> Def) -> 
 }
 
 // End of code copied from rust-clippy
-//
+
+
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
 enum RegionTarget<'tcx> {
     Region(Region<'tcx>),

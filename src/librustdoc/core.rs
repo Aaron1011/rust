@@ -67,6 +67,7 @@ pub struct DocContext<'a, 'tcx: 'a> {
     pub lt_substs: RefCell<FxHashMap<DefId, clean::Lifetime>>,
     pub send_trait: Option<DefId>,
     pub fake_def_ids: RefCell<FxHashMap<CrateNum, DefId>>,
+    pub all_fake_def_ids: RefCell<FxHashSet<DefId>>,
     /// Maps (type_id, trait_id) -> auto trait impl
     pub generated_synthetics: RefCell<FxHashSet<(DefId, DefId)>>
 }
@@ -228,11 +229,8 @@ pub fn run_core(search_paths: SearchPaths,
             ty_substs: Default::default(),
             lt_substs: Default::default(),
             send_trait: send_trait,
-            fake_def_ids: RefCell::new(FxHashMap()),/*Cell::new(DefId {
-                krate: LOCAL_CRATE,
-                index: tcx.hir.definitions().def_path_table().next_id(DefIndexAddressSpace::Low)
-
-            }),*/
+            fake_def_ids: RefCell::new(FxHashMap()),
+            all_fake_def_ids: RefCell::new(FxHashSet()),
             generated_synthetics: RefCell::new(FxHashSet())
 
         };
