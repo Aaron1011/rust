@@ -34,14 +34,13 @@ use rustc::middle::lang_items;
 use rustc::hir::{self, HirVec};
 use rustc::hir::def::{self, Def, CtorKind};
 use rustc::hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE, DefIndexAddressSpace};
-use rustc::traits::Reveal;
+use rustc::traits::{self, Reveal};
 use rustc::ty::subst::Substs;
 use rustc::ty::{self, TyCtxt, Predicate, TraitPredicate, Region, RegionVid, Ty, AdtKind};
 use rustc::middle::stability;
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
-use rustc::traits;
-use rustc::infer::InferCtxt;
+use rustc::infer::{InferCtxt, RegionObligation};
 use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
@@ -3682,6 +3681,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             let body_ids: FxHashSet<_> = infcx.region_obligations.borrow().iter().map(|&(id, _)| id).collect();
 
+            println!("Previous constraints: {:?} {:?}", ty, infcx.borrow_region_constraints().region_constraint_data().constraints);
+
             for id in body_ids {
                 infcx.process_registered_region_obligations(&[], None, new_env.clone(), id);
             }
@@ -3697,6 +3698,84 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         });
 
+    }
+
+    fn evaluate_nested_obligations<'b, 'c, 'd, 'cx, T: Iterator<Item = Obligation<'cx, ty::Predicate<'cx>>>>(&self, ty: ty::Ty, nested: T, computed_preds: &'b mut Vec<ty::Predicate<'cx>>, predicates: &'b mut VecDeque<ty::Binder<ty::TraitPredicate<'cx>>>, stop_at_param: bool, select: &mut traits::SelectionContext<'c, 'd, 'cx>) -> bool {
+        let dummy_cause = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
+
+        for (obligation, predicate) in nested.map(|o| (o.clone(), o.predicate.clone())) {
+            match &predicate {
+                &ty::Predicate::Trait(ref p) => {
+                    let substs = &p.skip_binder().trait_ref.substs;
+
+                    if stop_at_param {
+                        if self.is_of_param(substs) {
+                            println!("Final bound for {:?} {:?}", ty, predicate);
+                            computed_preds.push(predicate);
+                        } else {
+                            println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
+                            predicates.push_back(p.clone());
+                        }
+                    } else {
+                        println!("Computed and more processing for {:?} {:?}", ty, predicate);
+                        computed_preds.push(predicate);
+                        predicates.push_back(p.clone());
+                    }
+                },
+                &ty::Predicate::Projection(p) => {
+                    // If the projection isn't all type vars, then
+                    // we don't want to add it as a bound
+                    if self.is_of_param(p.skip_binder().projection_ty.substs) || !stop_at_param {
+                        println!("Final projection bound for {:?} {:?}", ty, p);
+                        computed_preds.push(predicate);
+                    } else {
+                        match traits::poly_project_and_unify_type(select, &obligation.with(p.clone())) {
+                            Err(e) => {
+                                println!("Unable to unify predicate '{:?}' '{:?}', bailing out", ty, e);
+                                return false
+                            },
+                            Ok(Some(v)) => {
+                                println!("Recursing with: {:?} {:?}", ty, v);
+                                if !self.evaluate_nested_obligations(ty, v.clone().iter().cloned(), computed_preds, predicates, stop_at_param, select) {
+                                    return false;
+                                }
+                            },
+                            Ok(None) => panic!("Unexpected result when selecting {:?} {:?}", ty, obligation)
+                        }
+                    }
+                },
+                &ty::Predicate::RegionOutlives(ref binder) => {
+                    if let Err(e) = select.infcx().region_outlives_predicate(&dummy_cause, binder) {
+                        println!("Unable to add outlives predicate {:?} {:?} {:?} bailing out", ty, binder, e);
+                        return false
+                    }
+                },
+                &ty::Predicate::TypeOutlives(ref binder) => {
+                    match (binder.no_late_bound_regions(), binder.map_bound_ref(|pred| pred.0).no_late_bound_regions()) {
+                        (None, Some(t_a)) => {
+                            select.infcx().register_region_obligation(ast::DUMMY_NODE_ID, RegionObligation {
+                                sup_type: t_a,
+                                sub_region: select.infcx().tcx.types.re_static,
+                                cause: dummy_cause.clone()
+                            });
+                        },
+                        (Some(ty::OutlivesPredicate(t_a, r_b)), _) => {
+                            select.infcx().register_region_obligation(
+                                ast::DUMMY_NODE_ID,
+                                RegionObligation {
+                                    sup_type: t_a,
+                                    sub_region: r_b,
+                                    cause: dummy_cause.clone()
+                                }
+                            );
+                        },
+                        _ => {}
+                    };
+                },
+                _ => panic!("Unexpected predicate {:?} {:?}", ty, predicate)
+            };
+        }
+        return true
     }
 
     fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>, stop_at_param: bool) -> Option<ty::ParamEnv<'c>> {
@@ -3715,6 +3794,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let mut computed_preds: Vec<_> = param_env.caller_bounds.iter().map(|p| p.clone()).collect();
 
         let mut new_env = param_env.clone();
+        let dummy_cause = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
 
         while let Some(pred) = predicates.pop_front() {
             infcx.clear_caches();
@@ -3723,11 +3803,16 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 continue;
             }
 
-            let result = select.select(&Obligation::new(ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID), new_env, pred));
+            let result = select.select(&Obligation::new(dummy_cause.clone(), new_env, pred));
 
             match &result {
                 &Ok(Some(ref vtable)) => {
-                    for predicate in vtable.clone().nested_obligations().iter().map(|o| o.predicate.clone()) {
+                    if !self.evaluate_nested_obligations(ty, vtable.clone().nested_obligations().iter().cloned(), &mut computed_preds, &mut predicates, stop_at_param, &mut select) {
+                        println!("evaluate_nested_obligations({:?}, {:?}) returned false, aborting", ty, vtable);
+                        return None
+                    }
+
+                    /*for (obligation, predicate) in vtable.clone().nested_obligations().iter().map(|o| (o.clone(), o.predicate.clone())) {
                         match &predicate {
                             &ty::Predicate::Trait(ref p) => {
                                 let substs = &p.skip_binder().trait_ref.substs;
@@ -3752,15 +3837,49 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                 if self.is_of_param(p.skip_binder().projection_ty.substs) || !stop_at_param {
                                     println!("Final projection bound for {:?} {:?}", ty, p);
                                     computed_preds.push(predicate);
+                                } else {
+                                    match traits::poly_project_and_unify_type(&mut select, &obligation.with(p.clone())) {
+                                        Err(e) => {
+                                            println!("Unable to unify predicate '{:?}' '{:?}', bailing out", ty, e);
+                                            return None
+                                        },
+                                        Ok(Some(v)) => predicates.extend(v.iter().map(|o| o.predicate.clone().to_predicate())),
+                                        Ok(None) => panic!("Unexpected result when selecting {:?} {:?}", ty, obligation)
+                                    }
                                 }
                             },
-                            &ty::Predicate::RegionOutlives(_) | &ty::Predicate::TypeOutlives(_) => {
-                                continue; // These are accounted for in RegionConstraintData
-                            }
+                            &ty::Predicate::RegionOutlives(ref binder) => {
+                                if let Err(e) = infcx.region_outlives_predicate(&dummy_cause, binder) {
+                                    println!("Unable to add outlives predicate {:?} {:?} {:?} bailing out", ty, binder, e);
+                                    return None
+                                }
+                            },
+                            &ty::Predicate::TypeOutlives(ref binder) => {
+                                match (binder.no_late_bound_regions(), binder.map_bound_ref(|pred| pred.0).no_late_bound_regions()) {
+                                    (None, Some(t_a)) => {
+                                        infcx.register_region_obligation(ast::DUMMY_NODE_ID, RegionObligation {
+                                            sup_type: t_a,
+                                            sub_region: tcx.types.re_static,
+                                            cause: dummy_cause.clone()
+                                        });
+                                    },
+                                    (Some(ty::OutlivesPredicate(t_a, r_b)), _) => {
+                                        infcx.register_region_obligation(
+                                            ast::DUMMY_NODE_ID,
+                                            RegionObligation {
+                                                sup_type: t_a,
+                                                sub_region: r_b,
+                                                cause: dummy_cause.clone()
+                                            }
+                                        );
+                                    },
+                                    _ => {}
+                                };
+                            },
                             _ => panic!("Unexpected predicate {:?} {:?}", ty, predicate)
                         };
                         
-                    }
+                    }*/
                 },
                 &Ok(None) => {
                     println!("Found Ok(None) when evaluating, bailing out {:?} {:?} {:?}", ty, result, pred);
