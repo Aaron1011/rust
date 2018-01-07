@@ -35,8 +35,8 @@ use rustc::hir::{self, HirVec};
 use rustc::hir::def::{self, Def, CtorKind};
 use rustc::hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE, DefIndexAddressSpace};
 use rustc::traits::{self, Reveal};
-use rustc::ty::subst::Substs;
-use rustc::ty::{self, TyCtxt, Predicate, TraitPredicate, Region, RegionVid, Ty, AdtKind};
+use rustc::ty::subst::{Substs, Kind};
+use rustc::ty::{self, TyCtxt, Predicate, TraitPredicate, Region, RegionVid, Ty, AdtKind, ToPredicate};
 use rustc::middle::stability;
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
@@ -45,6 +45,7 @@ use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
+use std::iter;
 use std::fmt;
 
 use rustc_const_math::ConstInt;
@@ -3670,7 +3671,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
             let full_env = self.evaluate_predicates(&mut infcx, trait_did, ty, orig_params, false).unwrap_or_else(|| panic!("Failed to fully process: {:?} {:?} {:?}", ty, trait_did, orig_params));
 
-            println!("Attempting to fulfill for {:?} {:?} {:?}", ty, trait_did, new_env);
+            println!("Attempting to fulfill for {:?} {:?} {:?}", ty, trait_did, full_env);
 
             let mut fulfill = FulfillmentContext::new();
             fulfill.register_bound(&infcx, full_env, ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
@@ -3704,22 +3705,23 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     fn evaluate_nested_obligations<'b, 'c, 'd, 'cx, T: Iterator<Item = Obligation<'cx, ty::Predicate<'cx>>>>(&self, ty: ty::Ty, nested: T, computed_preds: &'b mut Vec<ty::Predicate<'cx>>, predicates: &'b mut VecDeque<ty::Binder<ty::TraitPredicate<'cx>>>, stop_at_param: bool, select: &mut traits::SelectionContext<'c, 'd, 'cx>) -> bool {
         let dummy_cause = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
 
-        for (obligation, predicate) in nested.map(|o| (o.clone(), o.predicate.clone())) {
+        for (obligation, predicate) in nested.filter(|o| o.recursion_depth == 1).map(|o| (o.clone(), o.predicate.clone())) {
             match &predicate {
                 &ty::Predicate::Trait(ref p) => {
                     let substs = &p.skip_binder().trait_ref.substs;
+                    let final_preds = self.extra_preds(select.infcx().tcx, &predicate);
 
                     if stop_at_param {
                         if self.is_of_param(substs) {
-                            println!("Final bound for {:?} {:?}", ty, predicate);
-                            computed_preds.push(predicate);
+                            println!("Final bound for {:?} {:?}", ty, final_preds);
+                            computed_preds.extend(final_preds);
                         } else {
                             println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
                             predicates.push_back(p.clone());
                         }
                     } else {
-                        println!("Computed and more processing for {:?} {:?}", ty, predicate);
-                        computed_preds.push(predicate);
+                        println!("Computed and more processing for {:?} {:?}", ty, final_preds);
+                        computed_preds.extend(final_preds);
                         predicates.push_back(p.clone());
                     }
                 },
@@ -3728,6 +3730,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     // we don't want to add it as a bound
                     if self.is_of_param(p.skip_binder().projection_ty.substs) || !stop_at_param {
                         println!("Final projection bound for {:?} {:?}", ty, p);
+                        println!("Fake normalized: {:?}", traits::poly_project_and_unify_type(select, &obligation.with(p.clone())));
                         computed_preds.push(predicate);
                     } else {
                         match traits::poly_project_and_unify_type(select, &obligation.with(p.clone())) {
@@ -3805,86 +3808,32 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             }
 
             let result = select.select(&Obligation::new(dummy_cause.clone(), new_env, pred));
+            println!("Selected: {:?} {:?} {:?}", ty, pred, result);
 
             match &result {
                 &Ok(Some(ref vtable)) => {
-                    if !self.evaluate_nested_obligations(ty, vtable.clone().nested_obligations().iter().cloned(), &mut computed_preds, &mut predicates, stop_at_param, &mut select) {
+                    let obligations: Box<Iterator<Item=Obligation<ty::Predicate>>> = match vtable {
+                        /*&Vtable::VtableImpl(ref data) => {
+                            Box::new(tcx.predicates_of(data.impl_def_id).predicates.into_iter().map(|predicate| {
+                                Obligation {
+                                    cause: dummy_cause.clone(),
+                                    recursion_depth: 1,
+                                    param_env: new_env.clone(),
+                                    predicate: predicate
+                                }
+                            }))
+                        },*/
+                        _ => Box::new(vtable.clone().nested_obligations().into_iter())
+
+                    };
+
+                    if !self.evaluate_nested_obligations(ty, obligations, &mut computed_preds, &mut predicates, stop_at_param, &mut select) {
                         println!("evaluate_nested_obligations({:?}, {:?}) returned false, aborting", ty, vtable);
                         return None
                     }
-
-                    /*for (obligation, predicate) in vtable.clone().nested_obligations().iter().map(|o| (o.clone(), o.predicate.clone())) {
-                        match &predicate {
-                            &ty::Predicate::Trait(ref p) => {
-                                let substs = &p.skip_binder().trait_ref.substs;
-
-                                if stop_at_param {
-                                    if self.is_of_param(substs) {
-                                        println!("Final bound for {:?} {:?}", ty, predicate);
-                                        computed_preds.push(predicate);
-                                    } else {
-                                        println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
-                                        predicates.push_back(p.clone());
-                                    }
-                                } else {
-                                    println!("Computed and more processing for {:?} {:?}", ty, predicate);
-                                    computed_preds.push(predicate);
-                                    predicates.push_back(p.clone());
-                                }
-                            },
-                            &ty::Predicate::Projection(p) => {
-                                // If the projection isn't all type vars, then
-                                // we don't want to add it as a bound
-                                if self.is_of_param(p.skip_binder().projection_ty.substs) || !stop_at_param {
-                                    println!("Final projection bound for {:?} {:?}", ty, p);
-                                    computed_preds.push(predicate);
-                                } else {
-                                    match traits::poly_project_and_unify_type(&mut select, &obligation.with(p.clone())) {
-                                        Err(e) => {
-                                            println!("Unable to unify predicate '{:?}' '{:?}', bailing out", ty, e);
-                                            return None
-                                        },
-                                        Ok(Some(v)) => predicates.extend(v.iter().map(|o| o.predicate.clone().to_predicate())),
-                                        Ok(None) => panic!("Unexpected result when selecting {:?} {:?}", ty, obligation)
-                                    }
-                                }
-                            },
-                            &ty::Predicate::RegionOutlives(ref binder) => {
-                                if let Err(e) = infcx.region_outlives_predicate(&dummy_cause, binder) {
-                                    println!("Unable to add outlives predicate {:?} {:?} {:?} bailing out", ty, binder, e);
-                                    return None
-                                }
-                            },
-                            &ty::Predicate::TypeOutlives(ref binder) => {
-                                match (binder.no_late_bound_regions(), binder.map_bound_ref(|pred| pred.0).no_late_bound_regions()) {
-                                    (None, Some(t_a)) => {
-                                        infcx.register_region_obligation(ast::DUMMY_NODE_ID, RegionObligation {
-                                            sup_type: t_a,
-                                            sub_region: tcx.types.re_static,
-                                            cause: dummy_cause.clone()
-                                        });
-                                    },
-                                    (Some(ty::OutlivesPredicate(t_a, r_b)), _) => {
-                                        infcx.register_region_obligation(
-                                            ast::DUMMY_NODE_ID,
-                                            RegionObligation {
-                                                sup_type: t_a,
-                                                sub_region: r_b,
-                                                cause: dummy_cause.clone()
-                                            }
-                                        );
-                                    },
-                                    _ => {}
-                                };
-                            },
-                            _ => panic!("Unexpected predicate {:?} {:?}", ty, predicate)
-                        };
-                        
-                    }*/
                 },
                 &Ok(None) => {
-                    println!("Found Ok(None) when evaluating, bailing out {:?} {:?} {:?}", ty, result, pred);
-                    return None;
+                    println!("Found Ok(None) when evaluating, nothing more to do {:?} {:?} {:?}", ty, result, pred);
                 },
                 &Err(SelectionError::Unimplemented) => {
                     if self.is_of_param(pred.skip_binder().trait_ref.substs) || !stop_at_param {
@@ -3907,6 +3856,67 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         println!("Succeeded with {:?} {:?}", ty, new_env);
 
         return Some(new_env);
+    }
+
+    fn extra_preds<'b, 'c, 'd>(&self, tcx: TyCtxt<'b, 'c, 'd>, outer_pred: &ty::Predicate<'d>) -> Vec<ty::Predicate<'d>> {
+        let mut extra = vec![outer_pred.clone()];
+        extra
+
+        /*let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
+
+        match outer_pred {
+            &ty::Predicate::Trait(ty::Binder(ty::TraitPredicate { trait_ref } )) => {
+                let outer_ty = trait_ref.substs.type_at(0);
+                match outer_ty.sty {
+                    ty::TyProjection(left_hand_proj) => {
+
+                        let item = tcx.associated_item(left_hand_proj.item_def_id);
+                        let inner_trait = item.container.assert_trait();
+                        let trait_preds = tcx.predicates_of(inner_trait);
+                        let param_ty = left_hand_proj.substs.type_at(0);
+
+                        let mut sized_bound = None;
+                        for trait_pred in trait_preds.predicates.iter() {
+                            match trait_pred {
+                               & ty::Predicate::Trait(ty::Binder(inner_pred)) => {
+                                    match inner_pred.input_types().next().unwrap().sty {
+                                        ty::TyProjection(inner_project) => {
+                                            if inner_project.item_def_id == left_hand_proj.item_def_id {
+                                                println!("Found matching: {:?}", inner_project);
+                                                if inner_pred.def_id() == sized_trait {
+                                                    println!("Found sized bound");
+
+                                                    let substs = tcx.mk_substs(iter::once(Kind::from(outer_ty)));
+
+                                                    let modified_sized = ty::Binder(ty::TraitRef {
+                                                        def_id: sized_trait,
+                                                        substs
+                                                    }).to_predicate();
+
+                                                    println!("Modified sized: {:?}", modified_sized);
+                                                    sized_bound = Some(modified_sized);
+                                                    break;
+                                                }
+                                            }
+                                        },
+                                        _ => {}
+                                    };
+                                },
+                                _ => {}
+                            }
+                        }
+
+                        extra.extend(sized_bound.iter());
+                        //println!("Associated items generics: {:?} {:?}", p, preds);
+                        println!("Item new preds: {:?} {:?}", item, trait_preds);
+                    },
+                    _ => {}
+                }
+            },
+            _ => {}
+        };
+        println!("Extra preds: {:?} {:?}", outer_pred, extra);
+        extra*/
     }
 
 
@@ -4116,6 +4126,21 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         test_where_predicates.for_each(|p| match p {
             WherePredicate::BoundPredicate { ty, bounds } => {
+
+                // Writing a projection trait bound of the form
+                // <T as Trait>::Name : ?Sized
+                // is illegal, because ?Sized bounds can only
+                // be written in the (here, nonexistant) definition
+                // of the type.
+                // Therefore, we make sure that we never add a ?Sized
+                // bound for projections
+                match &ty {
+                    &Type::QPath { .. } => {
+                        has_sized.insert(ty.clone());
+                    },
+                    _ => {}
+                }
+
                 if bounds.is_empty() {
                    return;
                 }

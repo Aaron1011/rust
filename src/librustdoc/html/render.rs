@@ -3375,15 +3375,19 @@ fn render_assoc_items(w: &mut fmt::Formatter,
             <h2 id='implementations' class='small-section-header'>
               Trait Implementations<a href='#implementations' class='anchor'></a>
             </h2>
+            <div id='implementations-list'>
         ")?;
         render_impls(cx, w, concrete, containing_item)?;
+        write!(w, "</div>");
 
         write!(w, "
             <h2 id='synthetic-implementations' class='small-section-header'>
               Auto Trait Implementations<a href='#synthetic-implementations' class='anchor'></a>
             </h2>
+            <div id='synthetic-implementations-list'>
         ")?;
         render_impls(cx, w, synthetic, containing_item)?;
+        write!(w, "</div>");
     }
     Ok(())
 }
