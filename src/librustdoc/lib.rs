@@ -26,6 +26,7 @@
 #![feature(test)]
 #![feature(unicode)]
 #![feature(vec_remove_item)]
+#![feature(entry_and_modify)]
 
 extern crate arena;
 extern crate getopts;

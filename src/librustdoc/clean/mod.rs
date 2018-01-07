@@ -69,6 +69,7 @@ use self::cfg::Cfg;
 
 thread_local!(static MAX_DEF_ID: RefCell<FxHashMap<CrateNum, DefId>> = RefCell::new(FxHashMap()));
 
+const FN_OUTPUT_NAME: &'static str = "Output";
 
 // extract the stability index for a node from tcx, if possible
 fn get_stability(cx: &DocContext, def_id: DefId) -> Option<Stability> {
@@ -4111,12 +4112,15 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let mut lifetime_to_bounds = FxHashMap();
         let mut ty_to_traits: FxHashMap<Type, FxHashSet<Type>> = FxHashMap();
 
+        let mut ty_to_fn: FxHashMap<Type, (Option<PolyTrait>, Option<Type>)> = FxHashMap();
+
         test_where_predicates.for_each(|p| match p {
             WherePredicate::BoundPredicate { ty, bounds } => {
                 if bounds.is_empty() {
                    return;
                 }
 
+                let mut has_fn = false;
                 let mut new_bounds: Vec<TyParamBound> = bounds.into_iter().flat_map(|b| {
 
                     if b.is_sized_bound(self.cx) {
@@ -4130,9 +4134,26 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         return None
                     }
 
+                    // Handle any 'Fn/FnOnce/FnMut' bounds specially,
+                    // as we want to combine them with any 'Output' qpaths
+                    // later
+                    match &b {
+                        &TyParamBound::TraitBound(ref p, _) => {
+                            if self.is_fn_ty(&self.cx.tcx, &p.trait_) {
+                                let out = 
+                                ty_to_fn.entry(ty.clone())
+                                    .and_modify(|e| *e = (Some(p.clone()), e.1.clone()))
+                                    .or_insert((Some(p.clone()), None));
+
+                                return None
+                            }
+                        },
+                        _ => {}
+                    }
 
                     return Some(b);
                 }).collect();
+
 
                 ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).extend(new_bounds);
             },
@@ -4147,6 +4168,25 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                             Type::ResolvedPath { path: ref trait_path, ref typarams, ref did, ref is_generic } => {
                                 let mut new_trait_path = trait_path.clone();
 
+                                if self.is_fn_ty(&self.cx.tcx, trait_) && left_name == FN_OUTPUT_NAME {
+                                    ty_to_fn.entry(*ty.clone())
+                                        .and_modify(|e| *e = (e.0.clone(), Some(rhs.clone())))
+                                        .or_insert((None, Some(rhs)));
+                                    return;
+
+                                    /*ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashMap()).push(PolyTrait {
+                                        trait_: trait_.clone(),
+                                        generic_params: typarams.map_or_else(|| Vec::new(), |v| v.flat_map(|b| {
+                                            match b {
+                                                TyParamBound::RegionBound(l) => GenericParam::Lifetime(l),
+                                                TyParamBound::TraitBound(t, modifier) => GenericParam::Type(TyParam {
+                                                    name: 
+                                                }
+                                            }
+                                        }
+                                    }*/
+                                }
+
                                 // TODO: NLL
                                 {
                                     let params = &mut new_trait_path.segments.last_mut().unwrap().params;
@@ -4158,7 +4198,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                                 ty: rhs
                                             });
                                         },
-                                        _ => {
+                                        &mut PathParameters::Parenthesized { ref inputs, ref output } => {
+
                                             existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
                                             return // Don't touch things like <T as FnMut>::Output == K
                                         }
@@ -4182,6 +4223,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                 // Avoid creating any new duplicate bounds
                                 ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
 
+
                             },
                             _ => panic!("Unexpected trait {:?} for {:?}", trait_, did)
                         }
@@ -4191,11 +4233,56 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             }
         });
 
-        let final_predicates = ty_to_bounds.into_iter().filter(|&(_, ref bounds)| !bounds.is_empty()).map(|(ty, mut bounds)| {
+        let final_predicates = ty_to_bounds.into_iter().flat_map(|(ty, mut bounds)| {
+            println!("ty_to_fn: {:?} {:?}", ty, ty_to_fn);
+            if let Some(data) = ty_to_fn.get(&ty) {
+                let (poly_trait, output) = (data.0.as_ref().unwrap().clone(), data.1.as_ref().cloned());
+                let new_ty = match &poly_trait.trait_ {
+                    &Type::ResolvedPath { ref path, ref typarams, ref did, ref is_generic } => {
+                        let mut new_path = path.clone();
+                        let last_segment = new_path.segments.pop().unwrap();
+
+                        let (old_input, old_output) = match last_segment.params {
+                            PathParameters::AngleBracketed { types, .. } => (types, None),
+                            PathParameters::Parenthesized { inputs, output, .. } => (inputs, output)
+                        };
+
+                        if old_output.is_some() && old_output != output {
+                            panic!("Output mismatch for {:?} {:?} {:?}", ty, old_output, data.1);
+                        }
+
+                        let new_params = PathParameters::Parenthesized {
+                            inputs: old_input,
+                            output
+                        };
+
+                        new_path.segments.push(PathSegment {
+                            name: last_segment.name,
+                            params: new_params
+                        });
+
+                        Type::ResolvedPath {
+                            path: new_path,
+                            typarams: typarams.clone(),
+                            did: did.clone(),
+                            is_generic: *is_generic
+                        }
+                    },
+                    _ => panic!("Unexpected data: {:?}, {:?}", ty, data)
+                };
+                bounds.insert(TyParamBound::TraitBound(PolyTrait {
+                    trait_: new_ty,
+                    generic_params: poly_trait.generic_params
+                }, hir::TraitBoundModifier::None));
+            }
             if !has_sized.contains(&ty) {
                 bounds.insert(TyParamBound::maybe_sized(self.cx));
             }
-            WherePredicate::BoundPredicate { ty, bounds: bounds.into_iter().collect() }
+            if bounds.is_empty() {
+                return None
+            }
+
+            Some(WherePredicate::BoundPredicate { ty, bounds: bounds.into_iter().collect() })
         }).chain(lifetime_to_bounds.into_iter().filter(|&(_, ref bounds)| !bounds.is_empty()).map(|(lifetime, bounds)| {
             WherePredicate::RegionPredicate { lifetime, bounds : bounds.into_iter().collect() }
         }));
@@ -4208,6 +4295,18 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             where_predicates: existing_predicates
         }
 
+    }
+
+    fn is_fn_ty(&self, tcx: &TyCtxt, ty: &Type) -> bool {
+        match &ty {
+            &&Type::ResolvedPath { ref did, .. } => {
+                   *did == tcx.require_lang_item(lang_items::FnTraitLangItem)
+                || *did == tcx.require_lang_item(lang_items::FnMutTraitLangItem)
+                || *did == tcx.require_lang_item(lang_items::FnOnceTraitLangItem)
+
+            },
+            _ => false
+        }
     }
 
     fn next_def_id(&self, crate_num: CrateNum) -> DefId {
