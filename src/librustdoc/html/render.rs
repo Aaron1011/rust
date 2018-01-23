@@ -173,21 +173,6 @@ pub enum ExternalLocation {
     Unknown,
 }
 
-/// Metadata about implementations for a type or trait.
-pub struct Implementor {
-    pub def_id: DefId,
-    pub stability: Option<clean::Stability>,
-    pub item: clean::Item,
-}
-
-impl Implementor {
-    fn inner_impl(&self) -> &clean::Impl {
-        match self.item.inner {
-            clean::ImplItem(ref impl_) => impl_,
-            _ => panic!("non-impl item found in impl")
-        }
-    }
-}
 
 /// Metadata about implementations for a type.
 #[derive(Clone)]
@@ -1254,10 +1239,8 @@ impl DocFolder for Cache {
                             self.implementors
                         };*/
 
-                        self.implementors.entry(did).or_insert(vec![]).push(Implementor {
-                            def_id: item.def_id,
-                            stability: item.stability.clone(),
-                            item: item.clone()
+                        self.implementors.entry(did).or_insert(vec![]).push(Impl {
+                            impl_item: item.clone()
                         });
                     }
                 }
@@ -2029,12 +2012,7 @@ fn item_module(w: &mut fmt::Formatter, cx: &Context,
                item: &clean::Item, items: &[clean::Item]) -> fmt::Result {
     document(w, cx, item)?;
 
-    let mut indices = (0..items.len()).filter(|i| {
-        if items[*i].is_auto_impl() {
-            return false;
-        }
-        !items[*i].is_stripped()
-    }).collect::<Vec<usize>>();
+    let mut indices = (0..items.len()).filter(|i| !items[*i].is_stripped()).collect::<Vec<usize>>();
 
     // the order of item types in the listing
     fn reorder(ty: ItemType) -> u8 {
@@ -2384,16 +2362,14 @@ fn item_function(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
     document(w, cx, it)
 }
 
-fn render_implementor(cx: &Context, implementor: &Implementor, w: &mut fmt::Formatter, implementor_dups: &FxHashMap<&str, (DefId, bool)>) -> Result<(), fmt::Error> {
+fn render_implementor(cx: &Context, implementor: &Impl, w: &mut fmt::Formatter, implementor_dups: &FxHashMap<&str, (DefId, bool)>) -> Result<(), fmt::Error> {
     let cache = cache();
     write!(w, "<li>")?;
-    if let Some(item) = implementor2item(&cache, implementor) {
-        if let Some(l) = (Item { cx, item: &item }).src_href() {
-            write!(w, "<div class='out-of-band'>")?;
-            write!(w, "<a class='srclink' href='{}' title='{}'>[src]</a>",
-                        l, "goto source code")?;
-            write!(w, "</div>")?;
-        }
+    if let Some(l) = (Item { cx, item: &implementor.impl_item }).src_href() {
+        write!(w, "<div class='out-of-band'>")?;
+        write!(w, "<a class='srclink' href='{}' title='{}'>[src]</a>",
+                    l, "goto source code")?;
+        write!(w, "</div>")?;
     }
     write!(w, "<code>")?;
     // If there's already another implementor that has the same abbridged name, use the
@@ -2426,22 +2402,6 @@ fn render_impls(cx: &Context, w: &mut fmt::Formatter, traits: Vec<&&Impl>, conta
                     RenderMode::Normal, containing_item.stable_since(), true)?;
     }
     Ok(())
-}
-
-fn implementor2item(cache: &Cache, imp : &Implementor) -> Option<clean::Item> {
-    if imp.inner_impl().for_ == clean::DotDot {
-        debug!("implementor2item() called with DotDot");
-        return Some(imp.item.clone());
-    }
-    if let Some(t_did) = imp.inner_impl().for_.def_id() {
-        if let Some(impl_item) = cache.impls.get(&t_did).and_then(|i| i.iter()
-            .find(|i| i.impl_item.def_id == imp.def_id))
-        {
-            let i = &impl_item.impl_item;
-            return Some(i.clone());
-        }
-    }
-    None
 }
 
 fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
@@ -2683,7 +2643,6 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
         }
         write!(w, "</ul>")?;
 
-<<<<<<< HEAD
         for implementor in local {
             write!(w, "<li>")?;
             if let Some(l) = (Item { cx, item: &implementor.impl_item }).src_href() {
@@ -2714,11 +2673,6 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
             writeln!(w, "</code></li>")?;
         }
 
-        write!(w, "{}", synthetic_impl_header)?;
-        for implementor in synthetic {
-            render_implementor(cx, implementor, w, &implementor_dups)?;
-        }
-
         if t.auto {
             write!(w, "{}", synthetic_impl_header)?;
             for implementor in synthetic {
@@ -2729,14 +2683,19 @@ fn item_trait(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
 
         write!(w, r#"<script type="text/javascript">
                window.inlined_types=new Set();"#)?;
-        for did in local.into_iter().flat_map(|i| i.inner_impl().for_.def_id()) {
-            if cache.inlined.contains(&did) {
-                let path = cache.external_paths[&did].0.clone().join("::");
-                write!(w, "window.inlined_types.add({});", as_json(&path))?;
-            }
-        }
-        write!(w, r#"</script>"#)?;
 
+        write!(w, r#"<script type="text/javascript" async
+                     src="{root_path}/implementors/{path}/{ty}.{name}.js">
+             </script>"#,
+        root_path = vec![".."; cx.current.len()].join("/"),
+        path = if it.def_id.is_local() {
+            cx.current.join("/")
+        } else {
+            let (ref path, _) = cache.external_paths[&it.def_id];
+            path[..path.len() - 1].join("/")
+        },
+        ty = it.type_().css_class(),
+        name = *it.name.as_ref().unwrap())?;
     } else {
         // even without any implementations to write in, we still want the heading and list, so the
         // implementors javascript file pulled in below has somewhere to write the impls into
@@ -4174,13 +4133,7 @@ fn sidebar_module(fmt: &mut fmt::Formatter, _it: &clean::Item,
                    ItemType::Function, ItemType::Typedef, ItemType::Union, ItemType::Impl,
                    ItemType::TyMethod, ItemType::Method, ItemType::StructField, ItemType::Variant,
                    ItemType::AssociatedType, ItemType::AssociatedConst, ItemType::ForeignType] {
-        if items.iter().any(|it| {
-            if it.is_auto_impl() {
-                false
-            } else {
-                !it.is_stripped() && it.type_() == myty
-            }
-        }) {
+        if items.iter().any(|it| !it.is_stripped() && it.type_() == myty) {
             let (short, name) = match myty {
                 ItemType::ExternCrate |
                 ItemType::Import          => ("reexports", "Re-exports"),

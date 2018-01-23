@@ -306,32 +306,6 @@ pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
         }
     }
 
-    // If this is an auto impl, then bail out early here
-    if tcx.is_auto_impl(did) {
-        return ret.push(clean::Item {
-            inner: clean::ImplItem(clean::Impl {
-                    unsafety: hir::Unsafety::Normal,
-                    generics: Default::default(),
-                    provided_trait_methods: FxHashSet(),
-                    trait_: Some(match associated_trait.as_ref().unwrap().clean(cx) {
-                        clean::TraitBound(polyt, _) => polyt.trait_,
-                        clean::RegionBound(..) => unreachable!(),
-                    }),
-                    for_: clean::Type::DotDot,
-                    items: Vec::new(),
-                    polarity: None,
-                    synthetic: false
-            }),
-            source: tcx.def_span(did).clean(cx),
-            name: None,
-            attrs,
-            visibility: Some(clean::Inherited),
-            stability: tcx.lookup_stability(did).clean(cx),
-            deprecation: tcx.lookup_deprecation(did).clean(cx),
-            def_id: did,
-        });
-    }
-
     let for_ = tcx.type_of(did).clean(cx);
 
     // Only inline impl if the implementing type is

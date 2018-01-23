@@ -37,6 +37,7 @@ use rustc::hir::def_id::{CrateNum, DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE
 use rustc::traits::{self, Reveal};
 use rustc::ty::subst::{Substs, Kind};
 use rustc::ty::{self, TyCtxt, Predicate, TraitPredicate, Region, RegionVid, Ty, AdtKind, ToPredicate};
+use rustc::ty::subst::Subst;
 use rustc::middle::stability;
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
@@ -385,9 +386,6 @@ impl Item {
     }
     pub fn is_extern_crate(&self) -> bool {
         self.type_() == ItemType::ExternCrate
-    }
-    pub fn is_auto_impl(&self) -> bool {
-        match self.inner { ImplItem(Impl {ref for_, .. }) => *for_ == Type::DotDot, _ => false }
     }
 
     pub fn is_stripped(&self) -> bool {
@@ -3054,8 +3052,6 @@ fn build_deref_target_impls(cx: &DocContext,
     }
 }
 
-<<<<<<< HEAD
-=======
 impl Clean<Item> for doctree::AutoImpl {
     fn clean(&self, cx: &DocContext) -> Item {
         debug!("Cleaning AutoImpl: {:?}", self);
@@ -3083,7 +3079,6 @@ impl Clean<Item> for doctree::AutoImpl {
     }
 }
 
->>>>>>> Generate documentation for auto-trait impls
 impl Clean<Item> for doctree::ExternCrate {
     fn clean(&self, cx: &DocContext) -> Item {
         Item {
@@ -3672,6 +3667,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let full_env = self.evaluate_predicates(&mut infcx, trait_did, ty, orig_params, false).unwrap_or_else(|| panic!("Failed to fully process: {:?} {:?} {:?}", ty, trait_did, orig_params));
 
             println!("Attempting to fulfill for {:?} {:?} {:?}", ty, trait_did, full_env);
+            println!("Clearing cache");
+            infcx.clear_caches();
 
             let mut fulfill = FulfillmentContext::new();
             fulfill.register_bound(&infcx, full_env, ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
@@ -3814,14 +3811,52 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 &Ok(Some(ref vtable)) => {
                     let obligations: Box<Iterator<Item=Obligation<ty::Predicate>>> = match vtable {
                         /*&Vtable::VtableImpl(ref data) => {
-                            Box::new(tcx.predicates_of(data.impl_def_id).predicates.into_iter().map(|predicate| {
-                                Obligation {
+                            //let impl_trait_ref = tcx.impl_trait_ref(impl_def_id).unwrap();
+                            let impl_substs = infcx.fresh_substs_for_item(DUMMY_SP, data.impl_def_id);
+
+
+                            let mut obligations = Vec::new();
+
+                            for predicate in tcx.predicates_of(data.impl_def_id).predicates {
+                                let normalized = infcx.resolve_type_vars_if_possible(&traits::normalize(&mut select, new_env, dummy_cause.clone(), &predicate.subst(tcx, impl_substs)));
+                                let mut pred = normalized.value.clone();
+
+                                println!("Normalized: {:?}", normalized);
+                                println!("Orig: {:?}", predicate);
+
+                                match predicate {
+                                    ty::Predicate::Projection(_) => {
+                                        match normalized.value {
+                                            ty::Predicate::Trait(ty::Binder(p)) => {
+                                                if p.input_types().all(|t| {
+                                                    match p.self_ty().sty {
+                                                        ty::TyInfer(ty::TyVar(_)) => true,
+                                                        _ => false
+                                                    }
+                                                }) {
+                                                    println!("Found unnormalizeable predicate {:?} {:?} {:?}", ty, predicate, normalized);
+                                                    pred = predicate;
+                                                }
+                                            },
+                                            _ => {}
+                                        }
+                                    },
+                                    _ => {}
+                                }
+
+                                obligations.push(Obligation {
                                     cause: dummy_cause.clone(),
                                     recursion_depth: 1,
                                     param_env: new_env.clone(),
-                                    predicate: predicate
-                                }
-                            }))
+                                    predicate: pred
+                                });
+
+                            }
+
+                            println!("Orig obligations: {:?}", data.nested);
+                            println!("Computed obligations: {:?}", obligations);
+
+                            Box::new(obligations.into_iter())
                         },*/
                         _ => Box::new(vtable.clone().nested_obligations().into_iter())
 
@@ -4102,16 +4137,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
         let Generics { params: mut generic_params, where_predicates: old_where_predicates } = full_generics.clean(self.cx);
 
-        for p in generic_params.iter_mut() {
-            match p {
-                &mut GenericParam::Type(ref mut ty) => {
-                    // We never want something like 'impl<T=Foo>'
-                    ty.default.take();
-                },
-                _ => {}
-            }
-        }
-
 
 
         let mut old_where_predicates = FxHashSet::from_iter(old_where_predicates.into_iter());
@@ -4300,9 +4325,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     generic_params: poly_trait.generic_params
                 }, hir::TraitBoundModifier::None));
             }
-            if !has_sized.contains(&ty) {
-                bounds.insert(TyParamBound::maybe_sized(self.cx));
-            }
             if bounds.is_empty() {
                 return None
             }
@@ -4313,6 +4335,25 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }));
 
         existing_predicates.extend(final_predicates);
+
+        println!("Has sized: {:?}", has_sized);
+
+        for p in generic_params.iter_mut() {
+            match p {
+                &mut GenericParam::Type(ref mut ty) => {
+                    // We never want something like 'impl<T=Foo>'
+                    ty.default.take();
+
+                    let generic_ty = Type::Generic(ty.name.clone());
+
+                    if !has_sized.contains(&generic_ty) {
+                        ty.bounds.insert(0, TyParamBound::maybe_sized(self.cx));
+                    }
+                },
+                _ => {}
+            }
+        }
+
 
 
         Generics {
@@ -4355,7 +4396,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         let def_id = fake_ids.entry(crate_num).or_insert(start_def_id).clone();
         fake_ids.insert(crate_num, DefId {
             krate: crate_num,
-            index: DefIndex::from_u32(def_id.index.as_u32() + 1)
+            index: DefIndex::from_array_index(def_id.index.as_array_index() + 1, def_id.index.address_space())
         });
 
         MAX_DEF_ID.with(|m| {
