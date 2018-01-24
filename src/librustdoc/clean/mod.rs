@@ -989,6 +989,7 @@ impl<'tcx> Clean<TyParamBound> for ty::TraitRef<'tcx> {
                     if let ty::TyRef(ref reg, _) = ty_s.sty {
                         if let &ty::RegionKind::ReLateBound(..) = *reg {
                             debug!("  hit an ReLateBound {:?}", reg);
+                            println!("Base late bound type: {:?} {:?}", self, reg);
                             if let Some(lt) = reg.clean(cx) {
                                 late_bounds.push(GenericParam::Lifetime(lt));
                             }
@@ -3693,7 +3694,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             println!("Handle lifetimes: {:?} {:?}", region_data.constraints, names_map);
             let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
 
-            let new_generics = self.param_env_to_generics(did, full_env, generics.clone(), lifetime_predicates);
+            let new_generics = self.param_env_to_generics(infcx.tcx, did, full_env, generics.clone(), lifetime_predicates);
             debug!("find_auto_trait_generics(ty={:?}, did={:?}): {:?}", ty, did, new_generics);
             return AutoTraitResult::PositiveImpl(new_generics);
 
@@ -4147,7 +4148,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         lifetime_predicates
     }
 
-    fn param_env_to_generics(&self, did: DefId, param_env: ty::ParamEnv, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>) -> Generics {
+    fn param_env_to_generics<'b, 'c, 'cx>(&self, tcx: TyCtxt<'b, 'c, 'cx>, did: DefId, param_env: ty::ParamEnv<'cx>, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>) -> Generics {
 
         debug!("param_env_to_generics(did={:?}, param_env={:?}, type_generics={:?}, existing_predicates={:?})", did, param_env, type_generics, existing_predicates);
 
@@ -4163,9 +4164,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 &&ty::Predicate::Trait(pred) => pred.def_id() == sized_trait,
                 _ => false
             }
-        }).map(|p| p.clean(self.cx));
+        }).map(|p| (p.clone(), p.clean(self.cx)));
         
-        let full_generics = (&type_generics, &self.cx.tcx.predicates_of(did));
+        let full_generics = (&type_generics, &tcx.predicates_of(did));
         let Generics { params: mut generic_params, where_predicates: old_where_predicates } = full_generics.clean(self.cx);
 
 
@@ -4180,138 +4181,191 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
         let mut ty_to_fn: FxHashMap<Type, (Option<PolyTrait>, Option<Type>)> = FxHashMap();
 
-        test_where_predicates.for_each(|p| match p {
-            WherePredicate::BoundPredicate { ty, bounds } => {
+        test_where_predicates.for_each(|(orig_p, p)| {
 
-                // Writing a projection trait bound of the form
-                // <T as Trait>::Name : ?Sized
-                // is illegal, because ?Sized bounds can only
-                // be written in the (here, nonexistant) definition
-                // of the type.
-                // Therefore, we make sure that we never add a ?Sized
-                // bound for projections
-                match &ty {
-                    &Type::QPath { .. } => {
-                        has_sized.insert(ty.clone());
+
+
+            /*let clean_regions = FxHashMap();
+
+            for r in regions {
+                match r {
+                    ty::Region(ty::ReLateBound(_, ty::BoundRegion::BrNamed(_, name))) => {
+                        Some(GenericParam::Lifetime(Lifetime(name.as_str().to_string())))
                     },
-                    _ => {}
+                _ => None
                 }
+            }*/
 
-                if bounds.is_empty() {
-                   return;
-                }
 
-                let mut has_fn = false;
-                let mut new_bounds: Vec<TyParamBound> = bounds.into_iter().flat_map(|b| {
+            
+            match p {
+                WherePredicate::BoundPredicate { ty, mut bounds } => {
 
-                    if b.is_sized_bound(self.cx) {
-                        has_sized.insert(ty.clone());
-                        return None;
-                    }
-
-                    // If we've already added a projection bound for the same type, don't add
-                    // this, as it would be a duplicate
-                    if b.get_trait_type().and_then(|t| ty_to_traits.get(&ty).map(|bounds| bounds.contains(&strip_type(t.clone())))).unwrap_or(false) {
-                        return None
-                    }
-
-                    // Handle any 'Fn/FnOnce/FnMut' bounds specially,
-                    // as we want to combine them with any 'Output' qpaths
-                    // later
-                    match &b {
-                        &TyParamBound::TraitBound(ref p, _) => {
-                            if self.is_fn_ty(&self.cx.tcx, &p.trait_) {
-                                let out = 
-                                ty_to_fn.entry(ty.clone())
-                                    .and_modify(|e| *e = (Some(p.clone()), e.1.clone()))
-                                    .or_insert((Some(p.clone()), None));
-
-                                return None
-                            }
+                    // Writing a projection trait bound of the form
+                    // <T as Trait>::Name : ?Sized
+                    // is illegal, because ?Sized bounds can only
+                    // be written in the (here, nonexistant) definition
+                    // of the type.
+                    // Therefore, we make sure that we never add a ?Sized
+                    // bound for projections
+                    match &ty {
+                        &Type::QPath { .. } => {
+                            has_sized.insert(ty.clone());
                         },
                         _ => {}
                     }
 
-                    return Some(b);
-                }).collect();
+                    if bounds.is_empty() {
+                       return;
+                    }
+
+                    /*println!("Creating generics with original types: {:?} {:?}", orig_p, match orig_p {
+                        ty::Predicate(ty::Binder(orig_pred)) => {
+                            orig_pred.input_types().flat_map(|t| match t {
+                                ty::TyRef
+                            }
+                        }
+                    });*/
 
 
-                ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).extend(new_bounds);
-            },
-            WherePredicate::RegionPredicate { lifetime, bounds } => {
-                lifetime_to_bounds.entry(lifetime).or_insert_with(|| FxHashSet()).extend(bounds);
-            }
-            WherePredicate::EqPredicate { lhs, rhs } => {
-                match &lhs {
-                    &Type::QPath { name: ref left_name, ref self_type, ref trait_ } => {
-                        let ty = &*self_type;
-                        match **trait_ {
-                            Type::ResolvedPath { path: ref trait_path, ref typarams, ref did, ref is_generic } => {
-                                let mut new_trait_path = trait_path.clone();
+                    let clean_regions: Vec<_> = orig_p.walk_tys().flat_map(|t| {
+                        let mut regions = FxHashSet();
+                        tcx.collect_regions(&t, &mut regions);
 
-                                if self.is_fn_ty(&self.cx.tcx, trait_) && left_name == FN_OUTPUT_NAME {
-                                    ty_to_fn.entry(*ty.clone())
-                                        .and_modify(|e| *e = (e.0.clone(), Some(rhs.clone())))
-                                        .or_insert((None, Some(rhs)));
-                                    return;
+                        regions.into_iter().flat_map(|r| {
+                            match r {
+                                &ty::ReLateBound(_, ty::BoundRegion::BrNamed(_, name)) => {
+                                    Some(GenericParam::Lifetime(Lifetime(name.as_str().to_string())))
+                                },
+                            _    => None
+                            }
+                        })
+                    }).collect();
 
-                                    /*ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashMap()).push(PolyTrait {
-                                        trait_: trait_.clone(),
-                                        generic_params: typarams.map_or_else(|| Vec::new(), |v| v.flat_map(|b| {
-                                            match b {
-                                                TyParamBound::RegionBound(l) => GenericParam::Lifetime(l),
-                                                TyParamBound::TraitBound(t, modifier) => GenericParam::Type(TyParam {
-                                                    name: 
+                    println!("Found regions: {:?} {:?}", clean_regions, ty);
+
+                    assert!(bounds.len() == 1);
+                    let mut b = bounds.pop().unwrap();
+
+                    let mut has_fn = false;
+                    //let mut new_bounds: Vec<TyParamBound> = bounds.into_iter().flat_map(|mut b| {
+                    //
+
+
+                    println!("Existing trait bounds: {:?}", ty_to_traits);
+
+                    if b.is_sized_bound(self.cx) {
+                        has_sized.insert(ty.clone());
+
+                    // If we've already added a projection bound for the same type, don't add
+                    // this, as it would be a duplicate
+
+                    } else if !b.get_trait_type().and_then(|t| ty_to_traits.get(&ty).map(|bounds| bounds.contains(&strip_type(t.clone())))).unwrap_or(false) {
+
+                        println!("Handling normal bound {:?}", b);
+
+                        // Handle any 'Fn/FnOnce/FnMut' bounds specially,
+                        // as we want to combine them with any 'Output' qpaths
+                        // later
+                        if match &mut b {
+                            &mut TyParamBound::TraitBound(ref mut p, _) => {
+                                p.generic_params.extend(clean_regions);
+
+                                println!("New generic params: {:?}", p);
+
+                                if self.is_fn_ty(&tcx, &p.trait_) {
+                                    ty_to_fn.entry(ty.clone())
+                                        .and_modify(|e| *e = (Some(p.clone()), e.1.clone()))
+                                        .or_insert((Some(p.clone()), None));
+
+                                    ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet());
+
+                                    false
+                                } else {
+                                    true
+                                }
+                            },
+                            _ => true
+                        } {
+                            ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).insert(b);
+                        }
+                    }
+                },
+                WherePredicate::RegionPredicate { lifetime, bounds } => {
+                    lifetime_to_bounds.entry(lifetime).or_insert_with(|| FxHashSet()).extend(bounds);
+                }
+                WherePredicate::EqPredicate { lhs, rhs } => {
+                    match &lhs {
+                        &Type::QPath { name: ref left_name, ref self_type, ref trait_ } => {
+                            let ty = &*self_type;
+                            match **trait_ {
+                                Type::ResolvedPath { path: ref trait_path, ref typarams, ref did, ref is_generic } => {
+                                    let mut new_trait_path = trait_path.clone();
+
+                                    if self.is_fn_ty(&tcx, trait_) && left_name == FN_OUTPUT_NAME {
+                                        ty_to_fn.entry(*ty.clone())
+                                            .and_modify(|e| *e = (e.0.clone(), Some(rhs.clone())))
+                                            .or_insert((None, Some(rhs)));
+                                        return;
+
+                                        /*ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashMap()).push(PolyTrait {
+                                            trait_: trait_.clone(),
+                                            generic_params: typarams.map_or_else(|| Vec::new(), |v| v.flat_map(|b| {
+                                                match b {
+                                                    TyParamBound::RegionBound(l) => GenericParam::Lifetime(l),
+                                                    TyParamBound::TraitBound(t, modifier) => GenericParam::Type(TyParam {
+                                                        name: 
+                                                    }
                                                 }
                                             }
-                                        }
-                                    }*/
-                                }
-
-                                // TODO: NLL
-                                {
-                                    let params = &mut new_trait_path.segments.last_mut().unwrap().params;
-
-                                    match params {
-                                        &mut PathParameters::AngleBracketed { ref lifetimes, ref types, ref mut bindings } => {
-                                            bindings.push(TypeBinding {
-                                                name: left_name.clone(),
-                                                ty: rhs
-                                            });
-                                        },
-                                        &mut PathParameters::Parenthesized { ref inputs, ref output } => {
-
-                                            existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
-                                            return // Don't touch things like <T as FnMut>::Output == K
-                                        }
-
+                                        }*/
                                     }
-                                }
+
+                                    // TODO: NLL
+                                    {
+                                        let params = &mut new_trait_path.segments.last_mut().unwrap().params;
+
+                                        match params {
+                                            &mut PathParameters::AngleBracketed { ref lifetimes, ref types, ref mut bindings } => {
+                                                bindings.push(TypeBinding {
+                                                    name: left_name.clone(),
+                                                    ty: rhs
+                                                });
+                                            },
+                                            &mut PathParameters::Parenthesized { ref inputs, ref output } => {
+
+                                                existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
+                                                return // Don't touch things like <T as FnMut>::Output == K
+                                            }
+
+                                        }
+                                    }
 
 
-                                let bounds = ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashSet());
-                                
-                                bounds.insert(TyParamBound::TraitBound(PolyTrait {
-                                    trait_: Type::ResolvedPath { path: new_trait_path, typarams: typarams.clone(), did: did.clone(), is_generic: *is_generic },
-                                    generic_params: Vec::new()
+                                    let bounds = ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashSet());
+                                    
+                                    bounds.insert(TyParamBound::TraitBound(PolyTrait {
+                                        trait_: Type::ResolvedPath { path: new_trait_path, typarams: typarams.clone(), did: did.clone(), is_generic: *is_generic },
+                                        generic_params: Vec::new()
 
-                                }, hir::TraitBoundModifier::None));
+                                    }, hir::TraitBoundModifier::None));
 
-                                // Remove any existing 'plain' bound (e.g. 'T: Iterator`) so that
-                                // we don't see a duplicate bound like `T: Iterator + Iterator<Item=u8>`
-                                // on the docs page.
-                                bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
-                                // Avoid creating any new duplicate bounds
-                                ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
+                                    // Remove any existing 'plain' bound (e.g. 'T: Iterator`) so that
+                                    // we don't see a duplicate bound like `T: Iterator + Iterator<Item=u8>`
+                                    // on the docs page.
+                                    bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
+                                    // Avoid creating any new duplicate bounds
+                                    ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
 
 
-                            },
-                            _ => panic!("Unexpected trait {:?} for {:?}", trait_, did)
-                        }
-                    },
-                    _ => panic!("Unexpected LHS {:?} for {:?}", lhs, did)
+                                },
+                                _ => panic!("Unexpected trait {:?} for {:?}", trait_, did)
+                            }
+                        },
+                        _ => panic!("Unexpected LHS {:?} for {:?}", lhs, did)
+                    }
                 }
-            }
+            };
         });
 
         let final_predicates = ty_to_bounds.into_iter().flat_map(|(ty, mut bounds)| {
