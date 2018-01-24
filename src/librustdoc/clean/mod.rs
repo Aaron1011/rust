@@ -3655,16 +3655,18 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let mut last_env = orig_params;
 
 
+            let mut fresh_projects = FxHashSet();
+
             // We process the param env two times. The first time, we stop and save any 
             println!("Creating user-displayable param env: {:?} {:?}", ty, trait_did);
-            let new_env = match self.evaluate_predicates(&mut infcx, did, trait_did, ty, orig_params, true) {
+            let new_env = match self.evaluate_predicates(&mut infcx, did, trait_did, ty, orig_params, &mut fresh_projects, false) {
                 Some(e) => e,
                 None => return AutoTraitResult::NegativeImpl
             };
 
             println!("Reprocessing user param env: {:?} {:?}", ty, trait_did);
 
-            let full_env = self.evaluate_predicates(&mut infcx, did, trait_did, ty, new_env.clone(), false).unwrap_or_else(|| panic!("Failed to fully process: {:?} {:?} {:?}", ty, trait_did, orig_params));
+            let full_env = self.evaluate_predicates(&mut infcx, did, trait_did, ty, new_env.clone(), &mut fresh_projects, true).unwrap_or_else(|| panic!("Failed to fully process: {:?} {:?} {:?}", ty, trait_did, orig_params));
 
             println!("Attempting to fulfill for {:?} {:?} {:?} {:?}", ty, did, trait_did, full_env);
             println!("Clearing cache");
@@ -3699,7 +3701,24 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
     }
 
-    fn evaluate_nested_obligations<'b, 'c, 'd, 'cx, T: Iterator<Item = Obligation<'cx, ty::Predicate<'cx>>>>(&self, ty: ty::Ty, nested: T, computed_preds: &'b mut Vec<ty::Predicate<'cx>>, predicates: &'b mut VecDeque<ty::Binder<ty::TraitPredicate<'cx>>>, select: &mut traits::SelectionContext<'c, 'd, 'cx>, stop_at_param: bool) -> bool {
+    fn clean_project<'c, 'd, 'cx>(&self, infcx: &InferCtxt<'c, 'd, 'cx>, p: ty::PolyProjectionPredicate<'cx>) -> ty::PolyProjectionPredicate<'cx> {
+        p.map_bound(|proj| {
+            ty::ProjectionPredicate {
+                projection_ty: ty::ProjectionTy {
+                    substs: infcx.freshen(proj.projection_ty.substs),
+                    item_def_id: proj.projection_ty.item_def_id
+                },
+                ty: infcx.freshen(proj.ty)
+            }
+        })
+    }
+
+    fn evaluate_nested_obligations<'b, 'c, 'd, 'cx, T: Iterator<Item = Obligation<'cx, ty::Predicate<'cx>>>>(&self, ty: ty::Ty, nested: T,
+                                                                                                             computed_preds: &'b mut FxHashSet<ty::Predicate<'cx>>,
+                                                                                                             fresh_projects: &'b mut FxHashSet<ty::PolyProjectionPredicate<'cx>>,
+                                                                                                             predicates: &'b mut VecDeque<ty::PolyTraitPredicate<'cx>>,
+                                                                                                             select: &mut traits::SelectionContext<'c, 'd, 'cx>,
+                                                                                                             only_projections: bool) -> bool {
         let dummy_cause = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
 
         for (obligation, predicate) in nested.filter(|o| o.recursion_depth == 1).map(|o| (o.clone(), o.predicate.clone())) {
@@ -3709,14 +3728,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     let final_preds = self.extra_preds(select.infcx().tcx, &predicate);
 
                     //if stop_at_param {
-                        if self.is_of_param(substs) {
+                        println!("Got predicate: {:?} {:?} {:?}", ty, final_preds, only_projections);
+                        if self.is_of_param(substs) && !only_projections {
                             println!("Final bound for {:?} {:?}", ty, final_preds);
                             computed_preds.extend(final_preds);
-                            predicates.push_back(p.clone());
                         } else {
                             println!("More processing for {:?} {:?} {:?}", ty, predicate, substs);
-                            predicates.push_back(p.clone());
                         }
+                        predicates.push_back(p.clone());
                     /*} else {
                         //if self.is_of_param(substs)
                         println!("Computed and more processing for {:?} {:?}", ty, final_preds);
@@ -3727,10 +3746,14 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 &ty::Predicate::Projection(p) => {
                     // If the projection isn't all type vars, then
                     // we don't want to add it as a bound
-                    if self.is_of_param(p.skip_binder().projection_ty.substs) || !stop_at_param {
-                        println!("Final projection bound for {:?} {:?}", ty, p);
-                        println!("Fake normalized: {:?}", traits::poly_project_and_unify_type(select, &obligation.with(p.clone())));
-                        computed_preds.push(predicate);
+                    if self.is_of_param(p.skip_binder().projection_ty.substs) /*|| !stop_at_param*/ {
+                        if fresh_projects.insert(self.clean_project(select.infcx(), p.clone())) {
+                            println!("Final projection bound for {:?} {:?}", ty, p);
+                            println!("Fake normalized: {:?}", traits::poly_project_and_unify_type(select, &obligation.with(p.clone())));
+                            computed_preds.insert(predicate);
+                        } else {
+                            println!("Skipping existing projection pred {:?} {:?}", ty, p);
+                        }
                     } else {
                         match traits::poly_project_and_unify_type(select, &obligation.with(p.clone())) {
                             Err(e) => {
@@ -3739,7 +3762,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                             },
                             Ok(Some(v)) => {
                                 println!("Recursing with: {:?} {:?}", ty, v);
-                                if !self.evaluate_nested_obligations(ty, v.clone().iter().cloned(), computed_preds, predicates, select, stop_at_param) {
+                                if !self.evaluate_nested_obligations(ty, v.clone().iter().cloned(), computed_preds, fresh_projects, predicates, select, only_projections) {
                                     return false;
                                 }
                             },
@@ -3781,7 +3804,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         return true
     }
 
-    fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, ty_did: DefId, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>, stop_at_param: bool) -> Option<ty::ParamEnv<'c>> {
+    fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, ty_did: DefId, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>,
+                                         fresh_projects: &mut FxHashSet<ty::PolyProjectionPredicate<'c>>,
+                                         only_projections: bool) -> Option<ty::ParamEnv<'c>> {
         let tcx = infcx.tcx;
 
         let mut select = traits::SelectionContext::new(&infcx);
@@ -3793,10 +3818,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             substs: infcx.tcx.mk_substs_trait(ty, &[]),
         }}));
 
-        // Duplicates are fine, as they get removed later
-        let mut computed_preds: Vec<_> = param_env.caller_bounds.iter().map(|p| p.clone()).collect();
-
-        let mut new_env = tcx.lift_to_global(&param_env).expect("First global lift failed");
+        let mut computed_preds: FxHashSet<_> = param_env.caller_bounds.iter().cloned().collect();
+        
+        let mut new_env = param_env.clone();
         let dummy_cause = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
 
         while let Some(pred) = predicates.pop_front() {
@@ -3864,7 +3888,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
 
                     };
 
-                    if !self.evaluate_nested_obligations(ty, obligations, &mut computed_preds, &mut predicates, &mut select, stop_at_param) {
+                    if !self.evaluate_nested_obligations(ty, obligations, &mut computed_preds, fresh_projects, &mut predicates, &mut select, only_projections) {
                         println!("evaluate_nested_obligations({:?}, {:?}) returned false, aborting", ty, vtable);
                         return None
                     }
@@ -3873,10 +3897,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     println!("Found Ok(None) when evaluating, nothing more to do {:?} {:?} {:?}", ty, result, pred);
                 },
                 &Err(SelectionError::Unimplemented) => {
-                    if self.is_of_param(pred.skip_binder().trait_ref.substs) || !stop_at_param {
+                    if self.is_of_param(pred.skip_binder().trait_ref.substs) /*|| !stop_at_param*/ {
                         println!("Creating and reprocessing trait bound {:?} {:?}", ty, pred);
                         already_visited.remove(&pred);
-                        computed_preds.push(ty::Predicate::Trait(pred.clone()));
+                        computed_preds.insert(ty::Predicate::Trait(pred.clone()));
                         predicates.push_back(pred);
                     } else {
                         println!("Unimplemented found, bailing: {:?} {:?} {:?}", ty, pred, pred.skip_binder().trait_ref.substs);
@@ -3886,9 +3910,13 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 _ => panic!("Unexpected error for '{:?}': {:?}", ty, result)
             };
 
-            println!("Lifting predicates: {:?} {:?}", ty, computed_preds);
-            new_env = ty::ParamEnv::new(tcx.lift_to_global(&tcx.intern_predicates(tcx.mk_predicates(computed_preds.iter()))).unwrap(), param_env.reveal);
-            new_env = traits::normalize_param_env_or_error(self.cx.tcx, ty_did, new_env, dummy_cause.clone());
+            let normalized_preds = traits::elaborate_predicates(tcx, computed_preds.clone().into_iter().collect());
+            //println!("Lifting predicates: {:?} {:?}", ty, computed_preds);
+            //println!("Normalized preds: {:?}", normalized_preds);
+
+            new_env = ty::ParamEnv::new(tcx.mk_predicates(normalized_preds), param_env.reveal);
+            println!("Env with normalized predicates: {:?}", new_env);
+            //new_env = traits::normalize_param_env_or_error(self.cx.tcx, ty_did, new_env, dummy_cause.clone());
         }
 
         println!("Succeeded with {:?} {:?}", ty, new_env);
