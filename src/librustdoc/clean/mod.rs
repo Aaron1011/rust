@@ -30,6 +30,9 @@ use syntax_pos::{self, DUMMY_SP, Pos, FileName};
 use rustc::middle::const_val::ConstVal;
 use rustc::middle::privacy::AccessLevels;
 use rustc::middle::resolve_lifetime as rl;
+use rustc::ty::fold::TypeFolder;
+use rustc::ty::TypeFoldable;
+use rustc::middle::free_region::RegionRelations;
 use rustc::middle::lang_items;
 use rustc::hir::{self, HirVec};
 use rustc::hir::def::{self, Def, CtorKind};
@@ -43,6 +46,7 @@ use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use rustc_typeck::hir_ty_to_ty;
 use rustc::infer::{InferCtxt, RegionObligation};
 use rustc::infer::region_constraints::{RegionConstraintData, Constraint};
+use rustc::infer::outlives::env::OutlivesEnvironment;
 use rustc::traits::*;
 use std::collections::hash_map::Entry;
 use std::collections::VecDeque;
@@ -899,6 +903,13 @@ impl TyParamBound {
             }
         }
         false
+    }
+
+    fn get_poly_trait(&self) -> Option<PolyTrait> {
+        if let TyParamBound::TraitBound(ref p, _) = *self {
+            return Some(p.clone())
+        }
+        None
     }
 
     fn get_trait_type(&self) -> Option<Type> {
@@ -3689,12 +3700,19 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 infcx.process_registered_region_obligations(&[], None, full_env.clone(), id);
             }
 
-            let region_data = infcx.take_and_reset_region_constraints();
+            let region_data = infcx.borrow_region_constraints().region_constraint_data().clone();
 
             println!("Handle lifetimes: {:?} {:?}", region_data.constraints, names_map);
-            let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
+            let (lifetime_predicates, vid_to_region) = self.handle_lifetimes(&region_data, &names_map);
 
-            let new_generics = self.param_env_to_generics(infcx.tcx, did, full_env, generics.clone(), lifetime_predicates);
+            println!("Vid to region: {:?}", vid_to_region);
+
+            //infcx.resolve_regions_and_report_errors(did, &Default::default(), &OutlivesEnvironment::new(ty::ParamEnv::empty(Reveal::UserFacing)));
+
+            //println!("Resolved lexical regions: {:?}", infcx.lexical_region_resolutions);
+
+
+            let new_generics = self.param_env_to_generics(infcx.tcx, did, full_env, generics.clone(), lifetime_predicates, vid_to_region);
             debug!("find_auto_trait_generics(ty={:?}, did={:?}): {:?}", ty, did, new_generics);
             return AutoTraitResult::PositiveImpl(new_generics);
 
@@ -4036,7 +4054,107 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         }
     }
 
-    fn handle_lifetimes(&self, regions: &RegionConstraintData, names_map: &FxHashMap<String, Lifetime>) -> Vec<WherePredicate> {
+    fn map_vid_to_region<'cx>(&self, regions: &RegionConstraintData<'cx>) -> FxHashMap<ty::RegionVid, ty::Region<'cx>> {
+
+        let mut vid_map: FxHashMap<RegionTarget<'cx>, RegionDeps<'cx>> = FxHashMap();
+        let mut finished_map = FxHashMap();
+
+        for constraint in regions.constraints.keys() {
+            match constraint {
+                &Constraint::VarSubVar(r1, r2) => {
+                    {
+                        let deps1 = vid_map.entry(RegionTarget::RegionVid(r1)).or_insert_with(|| Default::default());
+                        deps1.larger.insert(RegionTarget::RegionVid(r2));
+                    }
+
+                    let deps2 = vid_map.entry(RegionTarget::RegionVid(r2)).or_insert_with(|| Default::default());
+                    deps2.smaller.insert(RegionTarget::RegionVid(r1));
+                },
+                &Constraint::RegSubVar(region, vid) => {
+                    {
+                        let deps1 = vid_map.entry(RegionTarget::Region(region)).or_insert_with(|| Default::default());
+                        deps1.larger.insert(RegionTarget::RegionVid(vid));
+                    }
+
+                    let deps2 = vid_map.entry(RegionTarget::RegionVid(vid)).or_insert_with(|| Default::default());
+                    deps2.smaller.insert(RegionTarget::Region(region));
+                },
+                &Constraint::VarSubReg(vid, region) => {
+                    finished_map.insert(vid, region);
+                   /* {
+                        let deps1 = vid_map.entry(RegionTarget::RegionVid(vid)).or_insert_with(|| Default::default());
+                        deps1.larger.insert(RegionTarget::Region(region));
+                    }
+
+                    let deps2 = vid_map.entry(RegionTarget::Region(region)).or_insert_with(|| Default::default());
+                    deps2.smaller.insert(RegionTarget::RegionVid(vid));*/
+                },
+                &Constraint::RegSubReg(r1, r2) => {
+                    {
+                        let deps1 = vid_map.entry(RegionTarget::Region(r1)).or_insert_with(|| Default::default());
+                        deps1.larger.insert(RegionTarget::Region(r2));
+                    }
+
+                    let deps2 = vid_map.entry(RegionTarget::Region(r2)).or_insert_with(|| Default::default());
+                    deps2.smaller.insert(RegionTarget::Region(r1));
+                }
+            }
+        }
+
+        while !vid_map.is_empty() {
+            let target = vid_map.keys().next().expect("Keys somehow empty").clone();
+            let deps = vid_map.remove(&target).expect("Entry somehow missing");
+
+            for smaller in deps.smaller.iter() {
+
+                for larger in deps.larger.iter() {
+                    match (smaller, larger) {
+                        (&RegionTarget::Region(r1), &RegionTarget::Region(r2)) => {
+                            if let Entry::Occupied(v) = vid_map.entry(*smaller) {
+                                let smaller_deps = v.into_mut();
+                                smaller_deps.larger.insert(*larger);
+                                smaller_deps.larger.remove(&target);
+                            }
+
+                            if let Entry::Occupied(v) = vid_map.entry(*larger) {
+                                let larger_deps = v.into_mut();
+                                larger_deps.smaller.insert(*smaller);
+                                larger_deps.smaller.remove(&target);
+                            }
+                        },
+                        (&RegionTarget::RegionVid(v1), &RegionTarget::Region(r1)) => {
+                            /*let lifetime = match r1 {
+                                &ty::ReEarlyBound(ty::EarlyBoundRegion { name, .. }) => {
+                                    Lifetime(name.as_str().to_string())
+                                },
+                                _ => panic!("Unexpected lifetime relationship (smaller, larger): {:?} {:?}", smaller, larger)
+                            };*/
+                            finished_map.insert(v1, r1);
+                        },
+                        (&RegionTarget::Region(r), &RegionTarget::RegionVid(v)) => {
+                            // Do nothing - we don't care about regions that are smaller than vids
+                        },
+                        (&RegionTarget::RegionVid(_), &RegionTarget::RegionVid(_)) => {
+                            if let Entry::Occupied(v) = vid_map.entry(*smaller) {
+                                let smaller_deps = v.into_mut();
+                                smaller_deps.larger.insert(*larger);
+                                smaller_deps.larger.remove(&target);
+                            }
+
+                            if let Entry::Occupied(v) = vid_map.entry(*larger) {
+                                let larger_deps = v.into_mut();
+                                larger_deps.smaller.insert(*smaller);
+                                larger_deps.smaller.remove(&target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        finished_map
+    }
+
+    fn handle_lifetimes<'cx>(&self, regions: &RegionConstraintData<'cx>, names_map: &FxHashMap<String, Lifetime>) -> (Vec<WherePredicate>, FxHashMap<ty::RegionVid, ty::Region<'cx>>) {
         // Our goal is to 'flatten' the list of constraints by eliminating
         // all intermediate RegionVids. At the end, all constraints should
         // be between Regions (aka region variables). This gives us the information
@@ -4076,6 +4194,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 }
             }
         }
+
+        let vid_to_region = self.map_vid_to_region(regions);
 
         while !vid_map.is_empty() {
             let target = vid_map.keys().next().expect("Keys somehow empty").clone();
@@ -4122,6 +4242,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             }
         }
 
+
         let mut finished_map = FxHashMap();
 
         for &(larger, smaller) in finished.iter() {
@@ -4145,10 +4266,12 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             })
         }).collect();
 
-        lifetime_predicates
+
+        (lifetime_predicates, vid_to_region)
     }
 
-    fn param_env_to_generics<'b, 'c, 'cx>(&self, tcx: TyCtxt<'b, 'c, 'cx>, did: DefId, param_env: ty::ParamEnv<'cx>, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>) -> Generics {
+    fn param_env_to_generics<'b, 'c, 'cx>(&self, tcx: TyCtxt<'b, 'c, 'cx>, did: DefId, param_env: ty::ParamEnv<'cx>, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>,
+                                          vid_to_region: FxHashMap<ty::RegionVid, ty::Region<'cx>>) -> Generics {
 
         debug!("param_env_to_generics(did={:?}, param_env={:?}, type_generics={:?}, existing_predicates={:?})", did, param_env, type_generics, existing_predicates);
 
@@ -4232,12 +4355,19 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         let mut regions = FxHashSet();
                         tcx.collect_regions(&t, &mut regions);
 
+                        println!("Finding regions for {:?}", t);
+
                         regions.into_iter().flat_map(|r| {
                             match r {
                                 &ty::ReLateBound(_, ty::BoundRegion::BrNamed(_, name)) => {
                                     Some(GenericParam::Lifetime(Lifetime(name.as_str().to_string())))
                                 },
-                            _    => None
+                                &ty::ReVar(vid) => {
+                                    println!("Found non-late region: {:?} {:?}", r, orig_p);
+                                    //vid_to_region.get(&vid).map(|l| GenericParam::Lifetime(l.clone()))
+                                    None
+                                },
+                                _ => panic!("Unexpected region type {:?}", r)
                             }
                         })
                     }).collect();
@@ -4248,8 +4378,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                     let mut b = bounds.pop().unwrap();
 
                     let mut has_fn = false;
-                    //let mut new_bounds: Vec<TyParamBound> = bounds.into_iter().flat_map(|mut b| {
-                    //
 
 
                     println!("Existing trait bounds: {:?}", ty_to_traits);
@@ -4267,27 +4395,49 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         // Handle any 'Fn/FnOnce/FnMut' bounds specially,
                         // as we want to combine them with any 'Output' qpaths
                         // later
-                        if match &mut b {
+                        //
+
+                        let is_fn = match &mut b {
                             &mut TyParamBound::TraitBound(ref mut p, _) => {
                                 p.generic_params.extend(clean_regions);
-
                                 println!("New generic params: {:?}", p);
-
-                                if self.is_fn_ty(&tcx, &p.trait_) {
-                                    ty_to_fn.entry(ty.clone())
-                                        .and_modify(|e| *e = (Some(p.clone()), e.1.clone()))
-                                        .or_insert((Some(p.clone()), None));
-
-                                    ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet());
-
-                                    false
-                                } else {
-                                    true
-                                }
+                                self.is_fn_ty(&tcx, &p.trait_)
                             },
-                            _ => true
-                        } {
-                            ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).insert(b);
+                            _ => false
+                        };
+                        
+                        let mut replacer = RegionReplacer {
+                            vid_to_region: &vid_to_region,
+                            tcx
+                        };
+
+                        let trait_ref = match orig_p {
+                            ty::Predicate::Trait(ty::Binder(t)) => t,
+                            _ => unreachable!()
+                        };
+
+                        let replaced_tys: Vec<_> = trait_ref.input_types().map(|t| {
+                            t.fold_with(&mut replacer)
+                        }).collect();
+
+                        println!("After replacing: {:?}", replaced_tys);
+
+                        let replaced_trait = ty::TraitRef {
+                            def_id: trait_ref.def_id(),
+                            substs: tcx.mk_substs(replaced_tys.into_iter().map(|t| Kind::from(t)))
+                        };
+
+                        let replaced_clean = replaced_trait.clean(self.cx);
+
+                        if is_fn {
+                            ty_to_fn.entry(ty.clone())
+                                .and_modify(|e| *e = (Some(replaced_clean.get_poly_trait().unwrap()), e.1.clone()))
+                                .or_insert((Some(replaced_clean.get_poly_trait().unwrap()), None));
+
+                            ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet());
+
+                        } else {
+                            ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).insert(replaced_clean);
                         }
                     }
                 },
@@ -4307,18 +4457,6 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                             .and_modify(|e| *e = (e.0.clone(), Some(rhs.clone())))
                                             .or_insert((None, Some(rhs)));
                                         return;
-
-                                        /*ty_to_bounds.entry(*ty.clone()).or_insert_with(|| FxHashMap()).push(PolyTrait {
-                                            trait_: trait_.clone(),
-                                            generic_params: typarams.map_or_else(|| Vec::new(), |v| v.flat_map(|b| {
-                                                match b {
-                                                    TyParamBound::RegionBound(l) => GenericParam::Lifetime(l),
-                                                    TyParamBound::TraitBound(t, modifier) => GenericParam::Type(TyParam {
-                                                        name: 
-                                                    }
-                                                }
-                                            }
-                                        }*/
                                     }
 
                                     // TODO: NLL
@@ -4494,6 +4632,28 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     }
 }
 
+struct RegionReplacer<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
+    vid_to_region: &'a FxHashMap<ty::RegionVid, ty::Region<'tcx>>,
+    tcx: TyCtxt<'a, 'gcx, 'tcx>
+}
+
+impl<'a, 'gcx, 'tcx> TypeFolder<'gcx, 'tcx> for RegionReplacer<'a, 'gcx, 'tcx> {
+
+    fn tcx<'b>(&'b self) -> TyCtxt<'b, 'gcx, 'tcx> {
+        self.tcx
+    }
+
+    fn fold_region(&mut self, r: ty::Region<'tcx>) -> ty::Region<'tcx> {
+        println!("Trying to replace: {:?} {:?}", r, self.vid_to_region);
+        (match r {
+            &ty::ReVar(vid) => {
+                self.vid_to_region.get(&vid).cloned()
+            },
+            _ => None
+        }).unwrap_or_else(|| r.super_fold_with(self))
+    }
+}
+
 
 pub fn def_id_to_path(cx: &DocContext, did: DefId, name: Option<String>) -> Vec<String> {
     let crate_name = name.unwrap_or_else(|| cx.tcx.crate_name(did.krate).to_string());
@@ -4630,7 +4790,7 @@ enum RegionTarget<'tcx> {
     RegionVid(RegionVid)
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct RegionDeps<'tcx> {
     larger: FxHashSet<RegionTarget<'tcx>>,
     smaller: FxHashSet<RegionTarget<'tcx>>
