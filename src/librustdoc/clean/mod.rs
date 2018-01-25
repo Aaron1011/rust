@@ -4412,32 +4412,37 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                         };
 
                         let trait_ref = match orig_p {
-                            ty::Predicate::Trait(ty::Binder(t)) => t,
+                            ty::Predicate::Trait(ty::Binder(ty::TraitPredicate { trait_ref } )) => trait_ref,
                             _ => unreachable!()
                         };
 
-                        let replaced_tys: Vec<_> = trait_ref.input_types().map(|t| {
+                        let replaced_substs = trait_ref.substs.fold_with(&mut replacer);
+                        let replaced_ty = trait_ref.self_ty().fold_with(&mut replacer);
+                        /*let replaced_substs: Vec<_> = trait_ref.substs.iter().map(|s| {
                             t.fold_with(&mut replacer)
-                        }).collect();
+                        }).collect();*/
 
-                        println!("After replacing: {:?}", replaced_tys);
+                        println!("After replacing trait ref: '{:?}' ty: '{:?}'", replaced_substs, replaced_ty);
 
                         let replaced_trait = ty::TraitRef {
-                            def_id: trait_ref.def_id(),
-                            substs: tcx.mk_substs(replaced_tys.into_iter().map(|t| Kind::from(t)))
+                            def_id: trait_ref.def_id,
+                            substs: replaced_substs/*tcx.mk_substs(replaced_tys.into_iter().map(|t| Kind::from(t)))*/
                         };
 
-                        let replaced_clean = replaced_trait.clean(self.cx);
+                        let replaced_trait_clean = replaced_trait.clean(self.cx);
+                        let replaced_ty_clean = replaced_ty.clean(self.cx);
+
+                        println!("Clean replaced trait ref: '{:?}' ty: '{:?}' ", replaced_trait_clean, replaced_ty_clean);
 
                         if is_fn {
-                            ty_to_fn.entry(ty.clone())
-                                .and_modify(|e| *e = (Some(replaced_clean.get_poly_trait().unwrap()), e.1.clone()))
-                                .or_insert((Some(replaced_clean.get_poly_trait().unwrap()), None));
+                            ty_to_fn.entry(replaced_ty_clean.clone())
+                                .and_modify(|e| *e = (Some(replaced_trait_clean.get_poly_trait().unwrap()), e.1.clone()))
+                                .or_insert((Some(replaced_trait_clean.get_poly_trait().unwrap()), None));
 
-                            ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet());
+                            ty_to_bounds.entry(replaced_ty_clean.clone()).or_insert_with(|| FxHashSet());
 
                         } else {
-                            ty_to_bounds.entry(ty.clone()).or_insert_with(|| FxHashSet()).insert(replaced_clean);
+                            ty_to_bounds.entry(replaced_ty_clean.clone()).or_insert_with(|| FxHashSet()).insert(replaced_trait_clean);
                         }
                     }
                 },
@@ -4491,9 +4496,9 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                     // Remove any existing 'plain' bound (e.g. 'T: Iterator`) so that
                                     // we don't see a duplicate bound like `T: Iterator + Iterator<Item=u8>`
                                     // on the docs page.
-                                    bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
+                                    //bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
                                     // Avoid creating any new duplicate bounds
-                                    ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
+                                    //ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
 
 
                                 },
