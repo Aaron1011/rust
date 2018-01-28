@@ -13,7 +13,6 @@
        html_root_url = "https://doc.rust-lang.org/nightly/",
        html_playground_url = "https://play.rust-lang.org/")]
 #![deny(warnings)]
-#![allow(warnings)]
 
 #![feature(ascii_ctype)]
 #![feature(rustc_private)]

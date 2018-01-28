@@ -1,3 +1,5 @@
+use rustc::ty::TypeFoldable;
+
 use super::*;
 
 
@@ -116,7 +118,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
             let real_name = name.as_ref().map(|n| Symbol::from(n.as_str()));
 
-            segments.push(hir::PathSegment::new(real_name.unwrap_or(last.name), self.generics_to_path_params(generics.clone(), def_id.krate), false));
+            segments.push(hir::PathSegment::new(real_name.unwrap_or(last.name), self.generics_to_path_params(generics.clone()), false));
 
             let new_path = hir::Path {
                 span: path.span,
@@ -154,7 +156,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         None
     }
 
-    fn generics_to_path_params(&self, generics: ty::Generics, cnum: CrateNum) -> hir::PathParameters {
+    fn generics_to_path_params(&self, generics: ty::Generics) -> hir::PathParameters {
         let lifetimes = HirVec::from_vec(generics.regions.iter().map(|p| {
             let name = if p.name == "" {
                 hir::LifetimeName::Static
@@ -168,7 +170,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                 name
             }
         }).collect());
-        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.clone(), cnum))).collect());
+        let types = HirVec::from_vec(generics.types.iter().map(|p| P(self.ty_param_to_ty(p.clone()))).collect());
 
         hir::PathParameters {
             lifetimes: lifetimes,
@@ -178,7 +180,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         }
     }
 
-    fn ty_param_to_ty(&self, param: ty::TypeParameterDef, cnum: CrateNum) -> hir::Ty {
+    fn ty_param_to_ty(&self, param: ty::TypeParameterDef) -> hir::Ty {
         debug!("ty_param_to_ty({:?}) {:?}", param, param.def_id);
         hir::Ty {
             id: ast::DUMMY_NODE_ID,
@@ -225,9 +227,6 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
 
         return tcx.infer_ctxt().enter(|mut infcx| {
-            let mut result: Result<Option<ty::ParamEnv>, Option<Predicate>> = Ok(Some(orig_params.clone()));
-            let mut last_env = orig_params;
-
 
             let mut fresh_preds = FxHashSet();
 
@@ -265,7 +264,8 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
             let region_data = infcx.borrow_region_constraints().region_constraint_data().clone();
 
-            let (lifetime_predicates, vid_to_region) = self.handle_lifetimes(&region_data, &names_map);
+            let lifetime_predicates = self.handle_lifetimes(&region_data, &names_map);
+            let vid_to_region = self.map_vid_to_region(&region_data);
 
             debug!("find_auto_trait_generics(did={:?}, trait_did={:?}, generics={:?}): computed lifetime information '{:?}' '{:?}'", did, trait_did, generics, lifetime_predicates, vid_to_region);
 
@@ -276,18 +276,6 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
         });
 
-    }
-
-    fn clean_project<'c, 'd, 'cx>(&self, infcx: &InferCtxt<'c, 'd, 'cx>, p: ty::PolyProjectionPredicate<'cx>) -> ty::PolyProjectionPredicate<'cx> {
-        p.map_bound(|proj| {
-            ty::ProjectionPredicate {
-                projection_ty: ty::ProjectionTy {
-                    substs: infcx.freshen(proj.projection_ty.substs),
-                    item_def_id: proj.projection_ty.item_def_id
-                },
-                ty: infcx.freshen(proj.ty)
-            }
-        })
     }
 
     fn clean_pred<'c, 'd, 'cx>(&self, infcx: &InferCtxt<'c, 'd, 'cx>, p: ty::Predicate<'cx>) -> ty::Predicate<'cx> {
@@ -337,7 +325,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                     }
                 },
                 &ty::Predicate::RegionOutlives(ref binder) => {
-                    if let Err(e) = select.infcx().region_outlives_predicate(&dummy_cause, binder) {
+                    if let Err(_) = select.infcx().region_outlives_predicate(&dummy_cause, binder) {
                         return false
                     }
                 },
@@ -434,30 +422,6 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         return Some((new_env, final_user_env));
     }
 
-
-    // If the substs contains something other than a type parameter,
-    // (e.g. a Cell<Foo>), then the FulfillmentContext was unable to find 
-    // a matching impl. In that case, we're done, since the only thing
-    // that we can do is add bounds on type parameters.
-    //
-    // For example, consider the type 'struct MyStruct<T>(T)'.
-    // Let's say that we want to determine when, if at all, it implements `Sync`
-    //
-    // The FulfillmentContext will tell us that it doesn't fulfill
-    // the `Sync` bound, returning us an erroring obligation for the trait ref `T: Sync`.
-    // That trait ref only contains TyParams, which means that it's possible
-    // for MyStruct to implement `Sync` when `T: Sync`. In other words, if a user
-    // creates a MyStruct<u8>, `MyStruct<u8>: Sync` because `u8: Sync`
-    //
-    // For a counter example, consider the type `struct OtherStruct<*const T>(T)`
-    // This time, the FulfillmentContext will tell us that it can't find an impl
-    // for the trait ref `*const T: Sync`. The fact that the TyParam is still enclosed in another
-    // type (a TyRawPtr) means that `*const T: Sync` will *never* be true.
-    // Otherwise, the FulfillmentContext would have found an impl for `*const T:
-    // Sync`, and started processing the nested obligation `T: Sync`
-    //
-    //
-
     fn is_of_param(&self, substs: &Substs) -> bool {
         if substs.is_noop() {
             return false
@@ -484,6 +448,8 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         }
     }
 
+    // This is very simiiar to handle_lifetimes. Instead of matching ty::Region's to ty::Region's,
+    // however, we match ty::RegionVid's to ty::Region's
     fn map_vid_to_region<'cx>(&self, regions: &RegionConstraintData<'cx>) -> FxHashMap<ty::RegionVid, ty::Region<'cx>> {
 
         let mut vid_map: FxHashMap<RegionTarget<'cx>, RegionDeps<'cx>> = FxHashMap();
@@ -532,7 +498,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
                 for larger in deps.larger.iter() {
                     match (smaller, larger) {
-                        (&RegionTarget::Region(r1), &RegionTarget::Region(r2)) => {
+                        (&RegionTarget::Region(_), &RegionTarget::Region(_)) => {
                             if let Entry::Occupied(v) = vid_map.entry(*smaller) {
                                 let smaller_deps = v.into_mut();
                                 smaller_deps.larger.insert(*larger);
@@ -548,7 +514,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                         (&RegionTarget::RegionVid(v1), &RegionTarget::Region(r1)) => {
                             finished_map.insert(v1, r1);
                         },
-                        (&RegionTarget::Region(r), &RegionTarget::RegionVid(v)) => {
+                        (&RegionTarget::Region(_), &RegionTarget::RegionVid(_)) => {
                             // Do nothing - we don't care about regions that are smaller than vids
                         },
                         (&RegionTarget::RegionVid(_), &RegionTarget::RegionVid(_)) => {
@@ -571,16 +537,30 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         finished_map
     }
 
-    fn handle_lifetimes<'cx>(&self, regions: &RegionConstraintData<'cx>, names_map: &FxHashMap<String, Lifetime>) -> (Vec<WherePredicate>, FxHashMap<ty::RegionVid, ty::Region<'cx>>) {
+    // This method calculates two things: Lifetime constraints of the form 'a: 'b,
+    // and region constraints of the form ReVar: 'a
+    //
+    // This is essentially a simplified version of lexical_region_resolve. However,
+    // handle_lifetimes determines what *needs be* true in order for an impl to hold.
+    // lexical_region_resolve, along with much of the rest of the compiler, is concerned
+    // with determining if a given set up constraints/predicates *are* met, given some
+    // starting conditions (e.g. user-provided code). For this reason, it's easier
+    // to perform the calculations we need on our own, rather than trying to make
+    // existing inference/solver code do what we want
+    fn handle_lifetimes<'cx>(&self, regions: &RegionConstraintData<'cx>, names_map: &FxHashMap<String, Lifetime>) -> Vec<WherePredicate> {
         // Our goal is to 'flatten' the list of constraints by eliminating
         // all intermediate RegionVids. At the end, all constraints should
         // be between Regions (aka region variables). This gives us the information
         // we need to create the Generics
         //
-        let mut finished = Vec::new();
+        let mut finished = FxHashMap();
 
         let mut vid_map: FxHashMap<RegionTarget, RegionDeps> = FxHashMap();
-        
+       
+        // Flattening is done in two parts. First, we insert all of the constraints
+        // into a map. Each RegionTarget (either a RegionVid or a Region) maps
+        // to its smaller and larger regions. Note that 'larger' regions correspond
+        // to sub-regions in Rust code (e.g. in 'a: 'b, 'a is the larger region).
         for constraint in regions.constraints.keys() {
             match constraint {
                 &Constraint::VarSubVar(r1, r2) => {
@@ -604,14 +584,30 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                     // The constraint is already in the form that we want, so we're done with it
                     // Desired order is 'larger, smaller', so flip then
                     if self.region_name(r1) != self.region_name(r2) {
-                        finished.push((r2, r1));
+                        finished.entry(self.region_name(r2).unwrap()).or_insert_with(|| Vec::new()).push(r1);
                     }
                 }
             }
         }
 
-        let vid_to_region = self.map_vid_to_region(regions);
 
+        // Here, we 'flatten' the map one element at a time.
+        // All of the element's sub and super regions are connected
+        // to each other. For example, if we have a graph that looks like this:
+        //
+        // (A, B) - C - (D, E)
+        // Where (A, B) are subregions, and (D,E) are super-regions
+        //
+        // then after deleting 'C', the graph will look like this:
+        //  ... - A - (D, E ...)
+        //  ... - B - (D, E, ...)
+        //  (A, B, ...) - D - ...
+        //  (A, B, ...) - E - ...
+        //
+        //  where '...' signifies the existing sub and super regions of an entry
+        //  When two adjacent ty::Regions are encountered, we've computed a final
+        //  constraint, and add it to our list. Since we make sure to never re-add
+        //  deleted items, this process will always finish.
         while !vid_map.is_empty() {
             let target = vid_map.keys().next().expect("Keys somehow empty").clone();
             let deps = vid_map.remove(&target).expect("Entry somehow missing");
@@ -622,7 +618,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                     match (smaller, larger) {
                         (&RegionTarget::Region(r1), &RegionTarget::Region(r2)) => {
                             if self.region_name(r1) != self.region_name(r2) {
-                                finished.push((r2, r1)) // Larger, smaller
+                                finished.entry(self.region_name(r2).unwrap()).or_insert_with(|| Vec::new()).push(r1)  // Larger, smaller
                             }
                         },
                         (&RegionTarget::RegionVid(_), &RegionTarget::Region(_)) => {
@@ -658,17 +654,17 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         }
 
 
-        let mut finished_map = FxHashMap();
+        /*let mut finished_map = FxHashMap();
 
         for &(larger, smaller) in finished.iter() {
             let larger_name = self.region_name(larger).expect("Missing larger name");
 
             finished_map.entry(larger_name).or_insert_with(|| Vec::new()).push(smaller);
-        }
+        }*/
 
         let lifetime_predicates = names_map.iter().flat_map(|(name, lifetime)| {
             let empty = Vec::new();
-            let bounds: FxHashSet<Lifetime> = finished_map.get(name).unwrap_or(&empty).iter().map(|region| {
+            let bounds: FxHashSet<Lifetime> = finished.get(name).unwrap_or(&empty).iter().map(|region| {
                 self.get_lifetime(region, names_map)
             }).collect();
 
@@ -681,8 +677,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
             })
         }).collect();
 
-
-        (lifetime_predicates, vid_to_region)
+        lifetime_predicates
     }
 
     fn param_env_to_generics<'b, 'c, 'cx>(&self, tcx: TyCtxt<'b, 'c, 'cx>, did: DefId, param_env: ty::ParamEnv<'cx>, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>,
@@ -694,8 +689,6 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         // The `Sized` trait must be handled specially, since we only only display it when
         // it is *not* required (i.e. '?Sized')
         let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
-
-
 
         let mut replacer = RegionReplacer {
             vid_to_region: &vid_to_region,
@@ -714,11 +707,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         });
         
         let full_generics = (&type_generics, &tcx.predicates_of(did));
-        let Generics { params: mut generic_params, where_predicates: old_where_predicates } = full_generics.clean(self.cx);
-
-
-
-        let mut old_where_predicates = FxHashSet::from_iter(old_where_predicates.into_iter());
+        let Generics { params: mut generic_params, .. } = full_generics.clean(self.cx);
 
 
         let mut has_sized = FxHashSet();
@@ -775,8 +764,6 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
                     assert!(bounds.len() == 1);
                     let mut b = bounds.pop().unwrap();
-
-                    let mut has_fn = false;
 
                     if b.is_sized_bound(self.cx) {
                         has_sized.insert(ty.clone());
@@ -838,13 +825,13 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                         let params = &mut new_trait_path.segments.last_mut().unwrap().params;
 
                                         match params {
-                                            &mut PathParameters::AngleBracketed { ref lifetimes, ref types, ref mut bindings } => {
+                                            &mut PathParameters::AngleBracketed { ref mut bindings, .. } => {
                                                 bindings.push(TypeBinding {
                                                     name: left_name.clone(),
                                                     ty: rhs
                                                 });
                                             },
-                                            &mut PathParameters::Parenthesized { ref inputs, ref output } => {
+                                            &mut PathParameters::Parenthesized { .. } => {
 
                                                 existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
                                                 return // Don't touch things like <T as FnMut>::Output == K

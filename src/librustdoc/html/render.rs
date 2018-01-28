@@ -351,7 +351,6 @@ pub struct Cache {
     // yet when its implementation methods are being indexed. Caches such methods
     // and their parent id here and indexes them at the end of crate parsing.
     orphan_impl_items: Vec<(DefId, clean::Item)>,
-    inlined: FxHashSet<DefId>
 }
 
 /// Temporary storage for data obtained during `RustdocVisitor::clean()`.
@@ -614,7 +613,7 @@ pub fn run(mut krate: clean::Crate,
 
     // Crawl the crate to build various caches used for the output
     let RenderInfo {
-        inlined,
+        inlined: _,
         external_paths,
         external_typarams,
         exact_paths,
@@ -651,7 +650,6 @@ pub fn run(mut krate: clean::Crate,
         owned_box_did,
         masked_crates: mem::replace(&mut krate.masked_crates, FxHashSet()),
         typarams: external_typarams,
-        inlined,
     };
 
     // Cache where all our extern crates are located
@@ -2443,7 +2441,6 @@ fn item_function(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
 }
 
 fn render_implementor(cx: &Context, implementor: &Impl, w: &mut fmt::Formatter, implementor_dups: &FxHashMap<&str, (DefId, bool)>) -> Result<(), fmt::Error> {
-    let cache = cache();
     write!(w, "<li>")?;
     if let Some(l) = (Item { cx, item: &implementor.impl_item }).src_href() {
         write!(w, "<div class='out-of-band'>")?;
@@ -3417,7 +3414,7 @@ fn render_assoc_items(w: &mut fmt::Formatter,
             <div id='implementations-list'>
         ")?;
         render_impls(cx, w, concrete, containing_item)?;
-        write!(w, "</div>");
+        write!(w, "</div>")?;
 
         write!(w, "
             <h2 id='synthetic-implementations' class='small-section-header'>
@@ -3426,7 +3423,7 @@ fn render_assoc_items(w: &mut fmt::Formatter,
             <div id='synthetic-implementations-list'>
         ")?;
         render_impls(cx, w, synthetic, containing_item)?;
-        write!(w, "</div>");
+        write!(w, "</div>")?;
     }
     Ok(())
 }

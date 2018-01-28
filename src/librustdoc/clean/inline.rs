@@ -25,7 +25,7 @@ use rustc::util::nodemap::FxHashSet;
 
 use core::{DocContext, DocAccessLevels};
 use doctree;
-use clean::{self, GetDefId, get_auto_traits_with_def_id, def_id_to_path};
+use clean::{self, GetDefId, get_auto_traits_with_def_id};
 
 use super::Clean;
 
