@@ -740,6 +740,27 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         lifetime_predicates
     }
 
+    fn extract_for_generics<'b, 'c, 'd>(&self, tcx: TyCtxt<'b, 'c, 'd>, pred: ty::Predicate<'d>) -> FxHashSet<GenericParam> {
+        pred.walk_tys().flat_map(|t| {
+            let mut regions = FxHashSet();
+            tcx.collect_regions(&t, &mut regions);
+
+            regions.into_iter().flat_map(|r| {
+                match r {
+                    // We only care about late bound regions, as we need to add them
+                    // to the 'for<>' section
+                    &ty::ReLateBound(_, ty::BoundRegion::BrNamed(_, name)) => {
+                        Some(GenericParam::Lifetime(Lifetime(name.as_str().to_string())))
+                    },
+                    &ty::ReVar(_) | &ty::ReEarlyBound(_) => {
+                        None
+                    },
+                    _ => panic!("Unexpected region type {:?}", r)
+                }
+            })
+        }).collect()
+    }
+
     fn param_env_to_generics<'b, 'c, 'cx>(&self, tcx: TyCtxt<'b, 'c, 'cx>, did: DefId, param_env: ty::ParamEnv<'cx>, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>,
                                           vid_to_region: FxHashMap<ty::RegionVid, ty::Region<'cx>>) -> Generics {
 
@@ -756,7 +777,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         };
 
         let orig_bounds: FxHashSet<_> = self.cx.tcx.param_env(did).caller_bounds.iter().collect();
-        let test_where_predicates = param_env.caller_bounds.iter().filter(|p| {
+        let clean_where_predicates = param_env.caller_bounds.iter().filter(|p| {
             !orig_bounds.contains(p) || match p {
                 &&ty::Predicate::Trait(pred) => pred.def_id() == sized_trait,
                 _ => false
@@ -777,8 +798,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
         let mut ty_to_fn: FxHashMap<Type, (Option<PolyTrait>, Option<Type>)> = FxHashMap();
 
-        test_where_predicates.for_each(|(orig_p, p)| {
-
+        for (orig_p, p) in clean_where_predicates {
             
             match p {
                 WherePredicate::BoundPredicate { ty, mut bounds } => {
@@ -798,11 +818,12 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                     }
 
                     if bounds.is_empty() {
-                       return;
+                       continue;
                     }
 
+                    let mut for_generics = self.extract_for_generics(tcx, orig_p.clone());
 
-                    let mut for_generics: FxHashSet<_> = orig_p.walk_tys().flat_map(|t| {
+                    /*let mut for_generics: FxHashSet<_> = orig_p.walk_tys().flat_map(|t| {
                         let mut regions = FxHashSet();
                         tcx.collect_regions(&t, &mut regions);
 
@@ -819,7 +840,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                 _ => panic!("Unexpected region type {:?}", r)
                             }
                         })
-                    }).collect();
+                    }).collect();*/
 
 
                     assert!(bounds.len() == 1);
@@ -827,11 +848,9 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
                     if b.is_sized_bound(self.cx) {
                         has_sized.insert(ty.clone());
-
-                    // If we've already added a projection bound for the same type, don't add
-                    // this, as it would be a duplicate
-
                     } else if !b.get_trait_type().and_then(|t| ty_to_traits.get(&ty).map(|bounds| bounds.contains(&strip_type(t.clone())))).unwrap_or(false) {
+                        // If we've already added a projection bound for the same type, don't add
+                        // this, as it would be a duplicate
 
                         // Handle any 'Fn/FnOnce/FnMut' bounds specially,
                         // as we want to combine them with any 'Output' qpaths
@@ -877,7 +896,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                         ty_to_fn.entry(*ty.clone())
                                             .and_modify(|e| *e = (e.0.clone(), Some(rhs.clone())))
                                             .or_insert((None, Some(rhs)));
-                                        return;
+                                        continue;
                                     }
 
                                     // TODO: NLL
@@ -894,7 +913,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                             &mut PathParameters::Parenthesized { .. } => {
 
                                                 existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
-                                                return // Don't touch things like <T as FnMut>::Output == K
+                                                continue // Don't touch things like <T as FnMut>::Output == K
                                             }
 
                                         }
@@ -925,7 +944,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                     }
                 }
             };
-        });
+        }
 
         let final_predicates = ty_to_bounds.into_iter().flat_map(|(ty, mut bounds)| {
             if let Some(data) = ty_to_fn.get(&ty) {
@@ -1014,6 +1033,14 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         }
     }
 
+    // This is an ugly hack, but it's the simplest way to handle synthetic impls without greatly
+    // refactorying either librustdoc or librustc. In particular, allowing new DefIds to be
+    // registered after the AST is constructed would require storing the defid mapping in a
+    // RefCell, decreasing the performance for normal compilation for very little gain.
+    //
+    // Instead, we construct 'fake' def ids, which start immediately after the last DefId in
+    // DefIndexAddressSpace::Low. In the Debug impl for clean::Item, we explicitly check for fake
+    // def ids, as we'll end up with a panic if we use the DefId Debug impl for fake DefIds
     fn next_def_id(&self, crate_num: CrateNum) -> DefId {
 
         let start_def_id = {
@@ -1048,6 +1075,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
     }
 }
 
+// Replaces all ReVars in a type with ty::Region's, using the provided map
 struct RegionReplacer<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     vid_to_region: &'a FxHashMap<ty::RegionVid, ty::Region<'tcx>>,
     tcx: TyCtxt<'a, 'gcx, 'tcx>
