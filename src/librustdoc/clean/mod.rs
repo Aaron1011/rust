@@ -4936,9 +4936,9 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                     // Remove any existing 'plain' bound (e.g. 'T: Iterator`) so that
                                     // we don't see a duplicate bound like `T: Iterator + Iterator<Item=u8>`
                                     // on the docs page.
-                                    //bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
+                                    bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
                                     // Avoid creating any new duplicate bounds
-                                    //ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
+                                    ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
 
 
                                 },
