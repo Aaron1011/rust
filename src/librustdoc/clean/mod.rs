@@ -4704,13 +4704,22 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         let sized_trait = self.cx.tcx.require_lang_item(lang_items::SizedTraitLangItem);
 
 
+
+        let mut replacer = RegionReplacer {
+            vid_to_region: &vid_to_region,
+            tcx
+        };
+
         let orig_bounds: FxHashSet<_> = self.cx.tcx.param_env(did).caller_bounds.iter().collect();
         let test_where_predicates = param_env.caller_bounds.iter().filter(|p| {
             !orig_bounds.contains(p) || match p {
                 &&ty::Predicate::Trait(pred) => pred.def_id() == sized_trait,
                 _ => false
             }
-        }).map(|p| (p.clone(), p.clean(self.cx)));
+        }).map(|p| {
+            let replaced = p.fold_with(&mut replacer);
+            (replaced.clone(), replaced.clean(self.cx))
+        });
         
         let full_generics = (&type_generics, &tcx.predicates_of(did));
         let Generics { params: mut generic_params, where_predicates: old_where_predicates } = full_generics.clean(self.cx);
@@ -4774,7 +4783,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                     });*/
 
 
-                    let clean_regions: Vec<_> = orig_p.walk_tys().flat_map(|t| {
+                    let mut clean_regions: FxHashSet<_> = orig_p.walk_tys().flat_map(|t| {
                         let mut regions = FxHashSet();
                         tcx.collect_regions(&t, &mut regions);
 
@@ -4824,19 +4833,19 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                         //
 
 
-                        
-                        let mut replacer = RegionReplacer {
-                            vid_to_region: &vid_to_region,
-                            tcx
-                        };
-
                         let trait_ref = match orig_p {
                             ty::Predicate::Trait(ty::Binder(ty::TraitPredicate { trait_ref } )) => trait_ref,
                             _ => unreachable!()
                         };
 
-                        let replaced_substs = trait_ref.substs.fold_with(&mut replacer);
-                        let replaced_ty = trait_ref.self_ty().fold_with(&mut replacer);
+                        //let replaced_substs = trait_ref.substs.fold_with(&mut replacer);
+                        //let replaced_ty = trait_ref.self_ty().fold_with(&mut replacer);
+                        //
+                        
+                        // TODO: Get rid of this entirely
+                        let replaced_substs = trait_ref.substs;
+                        let replaced_ty = trait_ref.self_ty();
+
                         /*let replaced_substs: Vec<_> = trait_ref.substs.iter().map(|s| {
                             t.fold_with(&mut replacer)
                         }).collect();*/
@@ -4855,7 +4864,10 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
                         let is_fn = match &mut replaced_trait_clean {
                             &mut TyParamBound::TraitBound(ref mut p, _) => {
-                                p.generic_params.extend(clean_regions);
+                                // Add existing regions to clean_regions to ensure
+                                // that we don't add duplicates
+                                clean_regions.extend(p.generic_params.clone());
+                                p.generic_params = clean_regions.into_iter().collect();
                                 println!("New generic params: {:?}", p);
                                 self.is_fn_ty(&tcx, &p.trait_)
                             },
