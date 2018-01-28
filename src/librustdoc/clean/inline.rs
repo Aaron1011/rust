@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::rc::Rc;
+use std::iter::once;
 
 use syntax::ast;
 use rustc::hir;

@@ -1971,7 +1971,7 @@ impl Clean<Item> for doctree::Trait {
             stability: self.stab.clean(cx),
             deprecation: self.depr.clean(cx),
             inner: TraitItem(Trait {
-                auto: self.auto,
+                auto: self.is_auto.clean(cx),
                 unsafety: self.unsafety,
                 items: self.items.clean(cx),
                 generics: self.generics.clean(cx),
@@ -3833,11 +3833,11 @@ impl Clean<TypeBinding> for hir::TypeBinding {
     }
 }
 
-struct AutoTraitFinder<'a, 'tcx: 'a> {
-    cx: &'a core::DocContext<'a, 'tcx>,
+struct AutoTraitFinder<'a, 'tcx: 'a, 'rcx: 'a> {
+    cx: &'a core::DocContext<'a, 'tcx, 'rcx>,
 }
 
-impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
+impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
     pub fn get_with_def_id(&self, def_id: DefId) -> Vec<Item> {
         let ty = self.cx.tcx.type_of(def_id);
