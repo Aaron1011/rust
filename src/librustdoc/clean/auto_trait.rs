@@ -761,6 +761,72 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         }).collect()
     }
 
+    fn make_final_bounds<'b, 'c, 'cx>(&self,
+                                      ty_to_bounds: FxHashMap<Type, FxHashSet<TyParamBound>>,
+                                      ty_to_fn: FxHashMap<Type, (Option<PolyTrait>, Option<Type>)>,
+                                      lifetime_to_bounds: FxHashMap<Lifetime, FxHashSet<Lifetime>>) -> Vec<WherePredicate> {
+        let final_predicates = ty_to_bounds.into_iter().flat_map(|(ty, mut bounds)| {
+            if let Some(data) = ty_to_fn.get(&ty) {
+            let (poly_trait, output) = (data.0.as_ref().unwrap().clone(), data.1.as_ref().cloned());
+            let new_ty = match &poly_trait.trait_ {
+                &Type::ResolvedPath { ref path, ref typarams, ref did, ref is_generic } => {
+                    let mut new_path = path.clone();
+                    let last_segment = new_path.segments.pop().unwrap();
+
+                    let (old_input, old_output) = match last_segment.params {
+                        PathParameters::AngleBracketed { types, .. } => (types, None),
+                        PathParameters::Parenthesized { inputs, output, .. } => (inputs, output)
+                    };
+
+                    if old_output.is_some() && old_output != output {
+                        panic!("Output mismatch for {:?} {:?} {:?}", ty, old_output, data.1);
+                    }
+
+                    let new_params = PathParameters::Parenthesized {
+                        inputs: old_input,
+                        output
+                    };
+
+                    new_path.segments.push(PathSegment {
+                        name: last_segment.name,
+                        params: new_params
+                    });
+
+                    Type::ResolvedPath {
+                        path: new_path,
+                        typarams: typarams.clone(),
+                        did: did.clone(),
+                        is_generic: *is_generic
+                    }
+                },
+                _ => panic!("Unexpected data: {:?}, {:?}", ty, data)
+            };
+            bounds.insert(TyParamBound::TraitBound(PolyTrait {
+                trait_: new_ty,
+                generic_params: poly_trait.generic_params
+            }, hir::TraitBoundModifier::None));
+        }
+        if bounds.is_empty() {
+            return None
+        }
+
+            Some(WherePredicate::BoundPredicate { ty, bounds: bounds.into_iter().collect() })
+        }).chain(lifetime_to_bounds.into_iter().filter(|&(_, ref bounds)| !bounds.is_empty()).map(|(lifetime, bounds)| {
+            WherePredicate::RegionPredicate { lifetime, bounds : bounds.into_iter().collect() }
+        })).collect();
+
+        final_predicates
+    }
+
+    // Converts the calculated ParamEnv and lifetime information to a clean::Generics, suitable for
+    // display on the docs page. Cleaning the Predicates produces sub-optimal WherePredicate's,
+    // so we fix them up:
+    //
+    // * Multiple bounds for the same type are coalesced into one: e.g. 'T: Copy', 'T: Debug' becomes
+    // 'T: Copy + Debug'
+    // * Fn bounds are handled specially - instead of leaving it as 'T: Fn(), <T as Fn::Output> =
+    // K', we use the dedicated syntax 'T: Fn() -> K'
+    // * We explcitly add a '?Sized' bound if we didn't find any 'Sized' predicates for a type
     fn param_env_to_generics<'b, 'c, 'cx>(&self, tcx: TyCtxt<'b, 'c, 'cx>, did: DefId, param_env: ty::ParamEnv<'cx>, type_generics: ty::Generics, mut existing_predicates: Vec<WherePredicate>,
                                           vid_to_region: FxHashMap<ty::RegionVid, ty::Region<'cx>>) -> Generics {
 
@@ -823,26 +889,6 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
                     let mut for_generics = self.extract_for_generics(tcx, orig_p.clone());
 
-                    /*let mut for_generics: FxHashSet<_> = orig_p.walk_tys().flat_map(|t| {
-                        let mut regions = FxHashSet();
-                        tcx.collect_regions(&t, &mut regions);
-
-                        regions.into_iter().flat_map(|r| {
-                            match r {
-                                // We only care about late bound regions, as we need to add them
-                                // to the 'for<>' section
-                                &ty::ReLateBound(_, ty::BoundRegion::BrNamed(_, name)) => {
-                                    Some(GenericParam::Lifetime(Lifetime(name.as_str().to_string())))
-                                },
-                                &ty::ReVar(_) | &ty::ReEarlyBound(_) => {
-                                    None
-                                },
-                                _ => panic!("Unexpected region type {:?}", r)
-                            }
-                        })
-                    }).collect();*/
-
-
                     assert!(bounds.len() == 1);
                     let mut b = bounds.pop().unwrap();
 
@@ -852,14 +898,15 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                         // If we've already added a projection bound for the same type, don't add
                         // this, as it would be a duplicate
 
+
                         // Handle any 'Fn/FnOnce/FnMut' bounds specially,
                         // as we want to combine them with any 'Output' qpaths
                         // later
 
                         let is_fn = match &mut b {
                             &mut TyParamBound::TraitBound(ref mut p, _) => {
-                                // Add existing regions to clean_regions to ensure
-                                // that we don't add duplicates
+                                // Insert regions into the for_generics hash map first, to ensure
+                                // that we don't end up with duplicate bounds (e.g. for<'b, 'b>)
                                 for_generics.extend(p.generic_params.clone());
                                 p.generic_params = for_generics.into_iter().collect();
                                 self.is_fn_ty(&tcx, &p.trait_)
@@ -899,11 +946,13 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                         continue;
                                     }
 
-                                    // TODO: NLL
+                                    // TODO: Remove this scope when NLL lands
                                     {
                                         let params = &mut new_trait_path.segments.last_mut().unwrap().params;
 
                                         match params {
+                                            // Convert somethiung like '<T as Iterator::Item> = u8'
+                                            // to 'T: Iterator<Item=u8>'
                                             &mut PathParameters::AngleBracketed { ref mut bindings, .. } => {
                                                 bindings.push(TypeBinding {
                                                     name: left_name.clone(),
@@ -913,7 +962,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                             &mut PathParameters::Parenthesized { .. } => {
 
                                                 existing_predicates.push(WherePredicate::EqPredicate { lhs: lhs.clone(), rhs });
-                                                continue // Don't touch things like <T as FnMut>::Output == K
+                                                continue // If something other than a Fn ends up with parenthesis, leave it alone
                                             }
 
                                         }
@@ -932,7 +981,8 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                     // we don't see a duplicate bound like `T: Iterator + Iterator<Item=u8>`
                                     // on the docs page.
                                     bounds.remove(&TyParamBound::TraitBound(PolyTrait { trait_: *trait_.clone(), generic_params: Vec::new() }, hir::TraitBoundModifier::None));
-                                    // Avoid creating any new duplicate bounds
+                                    // Avoid creating any new duplicate bounds later in the outer
+                                    // loop
                                     ty_to_traits.entry(*ty.clone()).or_insert_with(|| FxHashSet()).insert(*trait_.clone());
 
 
@@ -946,57 +996,9 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
             };
         }
 
-        let final_predicates = ty_to_bounds.into_iter().flat_map(|(ty, mut bounds)| {
-            if let Some(data) = ty_to_fn.get(&ty) {
-                let (poly_trait, output) = (data.0.as_ref().unwrap().clone(), data.1.as_ref().cloned());
-                let new_ty = match &poly_trait.trait_ {
-                    &Type::ResolvedPath { ref path, ref typarams, ref did, ref is_generic } => {
-                        let mut new_path = path.clone();
-                        let last_segment = new_path.segments.pop().unwrap();
-
-                        let (old_input, old_output) = match last_segment.params {
-                            PathParameters::AngleBracketed { types, .. } => (types, None),
-                            PathParameters::Parenthesized { inputs, output, .. } => (inputs, output)
-                        };
-
-                        if old_output.is_some() && old_output != output {
-                            panic!("Output mismatch for {:?} {:?} {:?}", ty, old_output, data.1);
-                        }
-
-                        let new_params = PathParameters::Parenthesized {
-                            inputs: old_input,
-                            output
-                        };
-
-                        new_path.segments.push(PathSegment {
-                            name: last_segment.name,
-                            params: new_params
-                        });
-
-                        Type::ResolvedPath {
-                            path: new_path,
-                            typarams: typarams.clone(),
-                            did: did.clone(),
-                            is_generic: *is_generic
-                        }
-                    },
-                    _ => panic!("Unexpected data: {:?}, {:?}", ty, data)
-                };
-                bounds.insert(TyParamBound::TraitBound(PolyTrait {
-                    trait_: new_ty,
-                    generic_params: poly_trait.generic_params
-                }, hir::TraitBoundModifier::None));
-            }
-            if bounds.is_empty() {
-                return None
-            }
-
-            Some(WherePredicate::BoundPredicate { ty, bounds: bounds.into_iter().collect() })
-        }).chain(lifetime_to_bounds.into_iter().filter(|&(_, ref bounds)| !bounds.is_empty()).map(|(lifetime, bounds)| {
-            WherePredicate::RegionPredicate { lifetime, bounds : bounds.into_iter().collect() }
-        }));
-
-        existing_predicates.extend(final_predicates);
+        let final_bounds = self.make_final_bounds(ty_to_bounds, ty_to_fn, lifetime_to_bounds);
+        
+        existing_predicates.extend(final_bounds);
 
         for p in generic_params.iter_mut() {
             match p {
