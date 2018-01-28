@@ -230,22 +230,53 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
             let mut fresh_preds = FxHashSet();
 
+            // Due to the way projections are handled by SelectionContext, we need to run
+            // evaluate_predicates twice: once on the original param env, and once on the result of
+            // the first evaluate_predicates call
+            //
+            // The problem is this: most of rustc, including SelectionContext and traits::project,
+            // are designed to work with a concrete usage of a type (e.g. Vec<u8>
+            // fn<T>() { Vec<T> }. This information will generally never change - given
+            // the 'T' in fn<T>() { ... }, we'll never know anything else about 'T'.
+            // If we're unable to prove that 'T' implements a particular trait, we're done -
+            // there's nothing left to do but error out.
+            //
+            // However, synthesizing an auto trait impl works differently. Here, we start out with
+            // a set of initial conditions - the ParamEnv of the struct/enum/union we're dealing
+            // with - and progressively discover the conditions we need to fulfill for it to
+            // implement a certain auto trait. This ends up breaking two assumptions made by trait
+            // selection and projection:
+            //
+            // * We can always cache the result of a particular trait selection for the lifetime of
+            // an InfCtxt
+            // * Given a projection bound such as '<T as SomeTrait>::SomeItem = K', if 'T:
+            // SomeTrait' doesn't hold, then we don't need to care about the 'SomeItem = K'
+            //
+            // We fix the first assumption by manually clearing out all of the InferCtxt's caches
+            // in between calls to SelectionContext.select. This allows us to keep all of the
+            // intermediate types we create bound to the 'tcx lifetime, rather than needing to lift
+            // them between calls
+            //
+            // We fix the second assumption by reprocessing the result of our first call to
+            // evaluate_predicates. Using the example of '<T as SomeTrait>::SomeItem = K', our first
+            // pass will pick up 'T: SomeTrait', but not 'SomeItem = K'. On our second pass,
+            // traits::project will see that 'T: SomeTrait' is in our ParamEnv, allowing
+            // SelectionContext to return it back to us.
+
             let (new_env, user_env) = match self.evaluate_predicates(&mut infcx, did, trait_did, ty, orig_params.clone(), orig_params, &mut fresh_preds, false) {
                 Some(e) => e,
                 None => return AutoTraitResult::NegativeImpl
             };
 
-            // We clear out fresh_preds before reprocessing because the entire
-            // point of reprocessing is to prefer certain properly-expanded predicates
-            // (usually nested obligations of projections) that didn't have their proper
-            // lifetimes inferred the first time around, due to missing predicates
-            //fresh_preds.clear();
 
             let (full_env, full_user_env) = self.evaluate_predicates(&mut infcx, did, trait_did, ty, new_env.clone(), user_env, &mut fresh_preds, true).unwrap_or_else(|| panic!("Failed to fully process: {:?} {:?} {:?}", ty, trait_did, orig_params));
 
             debug!("find_auto_trait_generics(did={:?}, trait_did={:?}, generics={:?}): fulfilling with {:?}", did, trait_did, generics, full_env);
             infcx.clear_caches();
 
+            // At this point, we already have all of the bounds we need. FulfillmentContext is used
+            // to store all of the necessary region/lifetime bounds in the InferContext, as well as
+            // an additional sanity check.
             let mut fulfill = FulfillmentContext::new();
             fulfill.register_bound(&infcx, full_env, ty, trait_did, ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID));
             fulfill.select_all_or_error(&infcx).unwrap_or_else(|e| panic!("Unable to fulfill trait {:?} for '{:?}': {:?}", trait_did, ty, e));
@@ -357,6 +388,43 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
         return true
     }
 
+    // The core logic responsible for computing the bounds for our synthesized impl.
+    //
+    // To calculate the bounds, we call SelectionContext.select in a loop. Like FulfillmentContext,
+    // we recursively select the nested obligations of predicates we encounter. However, whenver we
+    // encounter an UnimplementedError involving a type parameter, we add it to our ParamEnv. Since
+    // our goal is to determine when a particular type implements an auto trait, Unimplemented
+    // errors tell us what conditions need to be met.
+    //
+    // This method ends up working somewhat similary to FulfillmentContext, but with a few key
+    // differences. FulfillmentContext works under the assumption that it's dealing with concrete
+    // user code. According, it considers all possible ways that a Predicate could be met - which
+    // isn't always what we want for a synthesized impl. For example, given the predicate 'T:
+    // Iterator', FulfillmentContext can end up reporting an Unimplemented error for T:
+    // IntoIterator - since there's an implementation of Iteratpr where T: IntoIterator,
+    // FulfillmentContext will drive SelectionContext to consider that impl before giving up. If we
+    // were to rely on FulfillmentContext's decision, we might end up synthesizing an impl like
+    // this:
+    // 'impl<T> Send for Foo<T> where T: IntoIterator'
+    // 
+    // While it might be technically true that Foo implements Send where T: IntoIterator,
+    // the bound is overly restrictive - it's really only necessary that T: Iterator.
+    //
+    // For this reason, evaluate_predicates handles predicates with type variables specially. When
+    // we encounter an Unimplemented error for a bound such as 'T: Iterator', we immediately add it
+    // to our ParamEnv, and add it to our stack for recursive evaluation. When we later select it,
+    // we'll pick up any nested bounds, without ever inferring that 'T: IntoIterator' needs to
+    // hold.
+    //
+    // One additonal consideration is supertrait bounds. Normally, a ParamEnv is only ever
+    // consutrcted once for a given type. As part of the construction process, the ParamEnv will
+    // have any supertrait bounds normalized - e.g. if we have a type 'struct Foo<T: Copy>', the
+    // ParamEnv will contain 'T: Copy' and 'T: Clone', since 'Copy: Clone'. When we construct our
+    // own ParamEnv, we need to do this outselves, through traits::elaborate_predicates, or else
+    // SelectionContext will choke on the missing predicates. However, this should never show up in
+    // the final synthesized generics: we don't want our generated docs page to contain something
+    // like 'T: Copy + Clone', as that's redundant. Therefore, we keep track of a separate
+    // 'user_env', which only holds the predicates that will actually be displayed to the user.
     fn evaluate_predicates<'b, 'gcx, 'c>(&self, infcx: &mut InferCtxt<'b, 'tcx, 'c>, ty_did: DefId, trait_did: DefId, ty: ty::Ty<'c>, param_env: ty::ParamEnv<'c>, user_env: ty::ParamEnv<'c>,
                                          fresh_preds: &mut FxHashSet<ty::Predicate<'c>>,
                                          only_projections: bool) -> Option<(ty::ParamEnv<'c>, ty::ParamEnv<'c>)> {
@@ -399,7 +467,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                 &Ok(None) => {
                 },
                 &Err(SelectionError::Unimplemented) => {
-                    if self.is_of_param(pred.skip_binder().trait_ref.substs) /*|| !stop_at_param*/ {
+                    if self.is_of_param(pred.skip_binder().trait_ref.substs) {
                         already_visited.remove(&pred);
                         user_computed_preds.insert(ty::Predicate::Trait(pred.clone()));
                         predicates.push_back(pred);
@@ -653,15 +721,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
             }
         }
 
-
-        /*let mut finished_map = FxHashMap();
-
-        for &(larger, smaller) in finished.iter() {
-            let larger_name = self.region_name(larger).expect("Missing larger name");
-
-            finished_map.entry(larger_name).or_insert_with(|| Vec::new()).push(smaller);
-        }*/
-
+        
         let lifetime_predicates = names_map.iter().flat_map(|(name, lifetime)| {
             let empty = Vec::new();
             let bounds: FxHashSet<Lifetime> = finished.get(name).unwrap_or(&empty).iter().map(|region| {
