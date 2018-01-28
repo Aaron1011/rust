@@ -4782,6 +4782,8 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
 
                         regions.into_iter().flat_map(|r| {
                             match r {
+                                // We only care about late bound regions, as we need to add them
+                                // to the 'for<>' section
                                 &ty::ReLateBound(_, ty::BoundRegion::BrNamed(_, name)) => {
                                     Some(GenericParam::Lifetime(Lifetime(name.as_str().to_string())))
                                 },
@@ -4790,6 +4792,7 @@ impl<'a, 'tcx, 'rcx> AutoTraitFinder<'a, 'tcx, 'rcx> {
                                     //vid_to_region.get(&vid).map(|l| GenericParam::Lifetime(l.clone()))
                                     None
                                 },
+                                &ty::ReEarlyBound(_) => None,
                                 _ => panic!("Unexpected region type {:?}", r)
                             }
                         })
