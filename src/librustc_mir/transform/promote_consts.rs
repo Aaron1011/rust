@@ -388,6 +388,7 @@ pub fn promote_candidates<'a, 'tcx>(mir: &mut Mir<'tcx>,
                 IndexVec::new(),
                 None,
                 initial_locals,
+                vec![],
                 0,
                 vec![],
                 span

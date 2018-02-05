@@ -716,6 +716,12 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         self.infcx.tcx
     }
 
+    fn skip_assign_sub(&mut self, mir: &Mir<'tcx>, location: Location) -> bool {
+        let result = mir.self_borrows.iter().find(|l| l == &&location).is_some();
+        debug!("skip_assign_sub: {}", result);
+        result
+    }
+
     fn check_stmt(&mut self, mir: &Mir<'tcx>, stmt: &Statement<'tcx>, location: Location) {
         debug!("check_stmt: {:?}", stmt);
         let tcx = self.tcx();
@@ -723,17 +729,19 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
             StatementKind::Assign(ref place, ref rv) => {
                 let place_ty = place.ty(mir, tcx).to_ty(tcx);
                 let rv_ty = rv.ty(mir, tcx);
-                if let Err(terr) =
-                    self.sub_types(rv_ty, place_ty, location.at_successor_within_block())
-                {
-                    span_mirbug!(
-                        self,
-                        stmt,
-                        "bad assignment ({:?} = {:?}): {:?}",
-                        place_ty,
-                        rv_ty,
-                        terr
-                    );
+                if !self.skip_assign_sub(mir, location) {
+                    if let Err(terr) =
+                        self.sub_types(rv_ty, place_ty, location.at_successor_within_block())
+                    {
+                        span_mirbug!(
+                            self,
+                            stmt,
+                            "bad assignment ({:?} = {:?}): {:?}",
+                            place_ty,
+                            rv_ty,
+                            terr
+                        );
+                    }
                 }
                 self.check_rvalue(mir, rv, location);
             }

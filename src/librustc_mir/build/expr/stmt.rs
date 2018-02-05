@@ -12,6 +12,7 @@ use build::{BlockAnd, BlockAndExtension, Builder};
 use build::scope::BreakableScope;
 use hair::*;
 use rustc::mir::*;
+use rustc::ty::*;
 
 impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
 
@@ -33,25 +34,51 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                 let rhs = this.hir.mirror(rhs);
                 let lhs_span = lhs.span;
 
+                let lhs_place = unpack!(block = this.as_place(block, lhs.clone()));
+
+                let do_captures = match lhs.clone().ty.sty {
+                    // If we assign to something that holds are ref,
+                    // we want to prevent the lifetimes of reborrows
+                    // occuring in the rhs from being artificailly extend
+                    //
+                    // TODO: Can we detect if the lhs is a mutable 'let'?
+                    // if so, we can skip running capturing, since there
+                    // will never be any assignments
+                    TyRef(_, _) => true,
+                    _ => false
+                };
+
                 // Note: we evaluate assignments right-to-left. This
                 // is better for borrowck interaction with overloaded
                 // operators like x[j] = x[i].
 
                 // Generate better code for things that don't need to be
                 // dropped.
-                if this.hir.needs_drop(lhs.ty) {
+                //
+
+                if do_captures {
+                    this.start_self_assign(lhs_place.clone())
+                }
+
+                let result = if this.hir.needs_drop(lhs.ty) {
                     let rhs = unpack!(block = this.as_local_operand(block, rhs));
-                    let lhs = unpack!(block = this.as_place(block, lhs));
                     unpack!(block = this.build_drop_and_replace(
-                        block, lhs_span, lhs, rhs
+                        block, lhs_span, lhs_place.clone(), rhs
                     ));
                     block.unit()
                 } else {
                     let rhs = unpack!(block = this.as_local_rvalue(block, rhs));
-                    let lhs = unpack!(block = this.as_place(block, lhs));
-                    this.cfg.push_assign(block, source_info, &lhs, rhs);
+                    this.cfg.push_assign(block, source_info, &lhs_place, rhs);
                     block.unit()
+                };
+
+                if do_captures {
+                    let captures = this.stop_self_assign(&lhs_place);
+                    this.self_borrows.extend(captures.reborrows)
                 }
+
+                result
+
             }
             ExprKind::AssignOp { op, lhs, rhs } => {
                 // FIXME(#28160) there is an interesting semantics

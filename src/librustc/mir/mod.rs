@@ -104,6 +104,8 @@ pub struct Mir<'tcx> {
     /// variables and temporaries.
     pub local_decls: LocalDecls<'tcx>,
 
+    pub self_borrows: Vec<Location>,
+
     /// Number of arguments this function takes.
     ///
     /// Starting at local 1, `arg_count` locals will be provided by the caller
@@ -140,6 +142,7 @@ impl<'tcx> Mir<'tcx> {
                promoted: IndexVec<Promoted, Mir<'tcx>>,
                yield_ty: Option<Ty<'tcx>>,
                local_decls: IndexVec<Local, LocalDecl<'tcx>>,
+               self_borrows: Vec<Location>,
                arg_count: usize,
                upvar_decls: Vec<UpvarDecl>,
                span: Span) -> Self
@@ -157,6 +160,7 @@ impl<'tcx> Mir<'tcx> {
             generator_drop: None,
             generator_layout: None,
             local_decls,
+            self_borrows,
             arg_count,
             upvar_decls,
             spread_arg: None,
@@ -317,6 +321,7 @@ impl_stable_hash_for!(struct Mir<'tcx> {
     generator_drop,
     generator_layout,
     local_decls,
+    self_borrows,
     arg_count,
     upvar_decls,
     spread_arg,
@@ -1820,7 +1825,7 @@ impl<'a, 'b>  GraphSuccessors<'b> for Mir<'a> {
     type Iter = IntoIter<BasicBlock>;
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, RustcEncodable, RustcDecodable)]
 pub struct Location {
     /// the location is within this block
     pub block: BasicBlock,
@@ -1993,6 +1998,7 @@ impl<'tcx> TypeFoldable<'tcx> for Mir<'tcx> {
             generator_drop: self.generator_drop.fold_with(folder),
             generator_layout: self.generator_layout.fold_with(folder),
             local_decls: self.local_decls.fold_with(folder),
+            self_borrows: self.self_borrows.clone(),
             arg_count: self.arg_count,
             upvar_decls: self.upvar_decls.clone(),
             spread_arg: self.spread_arg,

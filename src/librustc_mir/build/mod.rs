@@ -23,6 +23,7 @@ use rustc::util::nodemap::NodeMap;
 use rustc_back::PanicStrategy;
 use rustc_const_eval::pattern::{BindingMode, PatternKind};
 use rustc_data_structures::indexed_vec::{IndexVec, Idx};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use shim;
 use std::mem;
 use std::u32;
@@ -32,6 +33,7 @@ use syntax::symbol::keywords;
 use syntax_pos::Span;
 use transform::MirSource;
 use util as mir_util;
+use self::self_assign::CaptureData;
 
 /// Construct the MIR for a given def-id.
 pub fn mir_build<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Mir<'tcx> {
@@ -285,6 +287,8 @@ struct Builder<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     /// details
     breakable_scopes: Vec<scope::BreakableScope<'tcx>>,
 
+    self_borrows: FxHashSet<Location>,
+
     /// the vector of all scopes that we have created thus far;
     /// we track this for debuginfo later
     visibility_scopes: IndexVec<VisibilityScope, VisibilityScopeData>,
@@ -307,6 +311,7 @@ struct Builder<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
 
 struct CFG<'tcx> {
     basic_blocks: IndexVec<BasicBlock, BasicBlockData<'tcx>>,
+    capture_stack: Vec<CaptureData<'tcx>>
 }
 
 newtype_index!(ScopeId);
@@ -533,7 +538,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
         let lint_level = LintLevel::Explicit(hir.root_lint_level);
         let mut builder = Builder {
             hir,
-            cfg: CFG { basic_blocks: IndexVec::new() },
+            cfg: CFG { basic_blocks: IndexVec::new(), capture_stack: Vec::new() },
             fn_span: span,
             arg_count,
             scopes: vec![],
@@ -546,6 +551,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             local_decls: IndexVec::from_elem_n(LocalDecl::new_return_place(return_ty,
                                                                              span), 1),
             var_indices: NodeMap(),
+            self_borrows: FxHashSet(),
             unit_temp: None,
             cached_resume_block: None,
             cached_return_block: None,
@@ -571,12 +577,15 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
             }
         }
 
+        debug!("Builder::finish(): computed self borrows: {:?}", self.self_borrows);
+
         Mir::new(self.cfg.basic_blocks,
                  self.visibility_scopes,
                  ClearCrossCrate::Set(self.visibility_scope_info),
                  IndexVec::new(),
                  yield_ty,
                  self.local_decls,
+                 self.self_borrows.into_iter().collect(),
                  self.arg_count,
                  upvar_decls,
                  self.fn_span
@@ -701,3 +710,4 @@ mod into;
 mod matches;
 mod misc;
 mod scope;
+mod self_assign;
