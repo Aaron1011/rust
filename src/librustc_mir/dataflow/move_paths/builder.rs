@@ -265,7 +265,7 @@ struct Gatherer<'b, 'a: 'b, 'gcx: 'tcx, 'tcx: 'a> {
 impl<'b, 'a, 'gcx, 'tcx> Gatherer<'b, 'a, 'gcx, 'tcx> {
     fn gather_statement(&mut self, stmt: &Statement<'tcx>) {
         match stmt.kind {
-            StatementKind::Assign(ref place, ref rval) => {
+            StatementKind::Assign(ref place, ref rval, _) => {
                 self.create_move_path(place);
                 if let RvalueInitializationState::Shallow = rval.initialization_state() {
                     // Box starts out uninitialized - need to create a separate

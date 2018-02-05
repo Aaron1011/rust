@@ -25,7 +25,7 @@ impl<'a, 'tcx> FunctionCx<'a, 'tcx> {
 
         self.set_debug_loc(&bx, statement.source_info);
         match statement.kind {
-            mir::StatementKind::Assign(ref place, ref rvalue) => {
+            mir::StatementKind::Assign(ref place, ref rvalue, _) => {
                 if let mir::Place::Local(index) = *place {
                     match self.locals[index] {
                         LocalRef::Place(tr_dest) => {

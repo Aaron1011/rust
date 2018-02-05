@@ -439,7 +439,7 @@ impl<'a, 'tcx> Inliner<'a, 'tcx> {
 
                     let stmt = Statement {
                         source_info: callsite.location,
-                        kind: StatementKind::Assign(tmp.clone(), dest)
+                        kind: StatementKind::Assign(tmp.clone(), dest, AssignmentOp::Normal)
                     };
                     caller_mir[callsite.bb]
                         .statements.push(stmt);
@@ -522,7 +522,7 @@ impl<'a, 'tcx> Inliner<'a, 'tcx> {
 
         let ref_stmt = Statement {
             source_info: callsite.location,
-            kind: StatementKind::Assign(ref_tmp.clone(), arg)
+            kind: StatementKind::Assign(ref_tmp.clone(), arg, AssignmentOp::Normal)
         };
 
         caller_mir[callsite.bb]
@@ -542,7 +542,7 @@ impl<'a, 'tcx> Inliner<'a, 'tcx> {
 
         let cast_stmt = Statement {
             source_info: callsite.location,
-            kind: StatementKind::Assign(Place::Local(cast_tmp), raw_ptr)
+            kind: StatementKind::Assign(Place::Local(cast_tmp), raw_ptr, AssignmentOp::Normal)
         };
 
         caller_mir[callsite.bb]
@@ -645,7 +645,7 @@ impl<'a, 'tcx> Inliner<'a, 'tcx> {
 
         let stmt = Statement {
             source_info: callsite.location,
-            kind: StatementKind::Assign(Place::Local(arg_tmp), arg),
+            kind: StatementKind::Assign(Place::Local(arg_tmp), arg, AssignmentOp::Normal),
         };
         caller_mir[callsite.bb].statements.push(stmt);
         arg_tmp

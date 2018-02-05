@@ -401,7 +401,7 @@ impl<'a, 'tcx> Qualifier<'a, 'tcx, 'tcx> {
             match *candidate {
                 Candidate::Ref(Location { block: bb, statement_index: stmt_idx }) => {
                     match self.mir[bb].statements[stmt_idx].kind {
-                        StatementKind::Assign(_, Rvalue::Ref(_, _, Place::Local(index))) => {
+                        StatementKind::Assign(_, Rvalue::Ref(_, _, Place::Local(index)), _) => {
                             promoted_temps.add(&index);
                         }
                         _ => {}
@@ -882,6 +882,7 @@ impl<'a, 'tcx> Visitor<'tcx> for Qualifier<'a, 'tcx, 'tcx> {
                     _: BasicBlock,
                     dest: &Place<'tcx>,
                     rvalue: &Rvalue<'tcx>,
+                    op: &AssignmentOp,
                     location: Location) {
         self.visit_rvalue(rvalue, location);
 
@@ -923,8 +924,8 @@ impl<'a, 'tcx> Visitor<'tcx> for Qualifier<'a, 'tcx, 'tcx> {
         self.nest(|this| {
             this.visit_source_info(&statement.source_info);
             match statement.kind {
-                StatementKind::Assign(ref place, ref rvalue) => {
-                    this.visit_assign(bb, place, rvalue, location);
+                StatementKind::Assign(ref place, ref rvalue, ref op) => {
+                    this.visit_assign(bb, place, rvalue, op, location);
                 }
                 StatementKind::SetDiscriminant { .. } |
                 StatementKind::StorageLive(_) |

@@ -195,6 +195,7 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                             block: mir::BasicBlock,
                             assigned_place: &mir::Place<'tcx>,
                             rvalue: &mir::Rvalue<'tcx>,
+                            op: &mir::AssignmentOp,
                             location: mir::Location) {
                 fn root_local(mut p: &mir::Place<'_>) -> Option<mir::Local> {
                     loop { match p {
@@ -222,7 +223,7 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                     }
                 }
 
-                return self.super_assign(block, assigned_place, rvalue, location);
+                return self.super_assign(block, assigned_place, rvalue, op, location);
 
                 fn insert<'a, K, V>(map: &'a mut FxHashMap<K, FxHashSet<V>>,
                                     k: &K,
@@ -362,7 +363,7 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                 }
             }
 
-            mir::StatementKind::Assign(ref lhs, ref rhs) => {
+            mir::StatementKind::Assign(ref lhs, ref rhs, _) => {
                 // Make sure there are no remaining borrows for variables
                 // that are assigned over.
                 if let Place::Local(ref local) = *lhs {

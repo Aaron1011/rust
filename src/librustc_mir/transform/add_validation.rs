@@ -318,12 +318,12 @@ impl MirPass for AddValidation {
             for i in (0..block_data.statements.len()).rev() {
                 match block_data.statements[i].kind {
                     // When the borrow of this ref expires, we need to recover validation.
-                    StatementKind::Assign(_, Rvalue::Ref(_, _, _)) => {
+                    StatementKind::Assign(_, Rvalue::Ref(_, _, _), _) => {
                         // Due to a lack of NLL; we can't capture anything directly here.
                         // Instead, we have to re-match and clone there.
                         let (dest_place, re, src_place) = match block_data.statements[i].kind {
                             StatementKind::Assign(ref dest_place,
-                                                  Rvalue::Ref(re, _, ref src_place)) => {
+                                                  Rvalue::Ref(re, _, ref src_place), _) => {
                                 (dest_place.clone(), re, src_place.clone())
                             },
                             _ => bug!("We already matched this."),
@@ -352,17 +352,17 @@ impl MirPass for AddValidation {
                         block_data.statements.insert(i, release_stmt);
                     }
                     // Casts can change what validation does (e.g. unsizing)
-                    StatementKind::Assign(_, Rvalue::Cast(kind, Operand::Copy(_), _)) |
-                    StatementKind::Assign(_, Rvalue::Cast(kind, Operand::Move(_), _))
+                    StatementKind::Assign(_, Rvalue::Cast(kind, Operand::Copy(_), _), _) |
+                    StatementKind::Assign(_, Rvalue::Cast(kind, Operand::Move(_), _), _)
                         if kind != CastKind::Misc =>
                     {
                         // Due to a lack of NLL; we can't capture anything directly here.
                         // Instead, we have to re-match and clone there.
                         let (dest_place, src_place) = match block_data.statements[i].kind {
                             StatementKind::Assign(ref dest_place,
-                                    Rvalue::Cast(_, Operand::Copy(ref src_place), _)) |
+                                    Rvalue::Cast(_, Operand::Copy(ref src_place), _), _) |
                             StatementKind::Assign(ref dest_place,
-                                    Rvalue::Cast(_, Operand::Move(ref src_place), _)) =>
+                                    Rvalue::Cast(_, Operand::Move(ref src_place), _), _) =>
                             {
                                 (dest_place.clone(), src_place.clone())
                             },

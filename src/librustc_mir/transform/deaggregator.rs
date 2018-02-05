@@ -47,8 +47,8 @@ impl MirPass for Deaggregator {
                 let src_info = bb.statements[idx].source_info;
                 let suffix_stmts = bb.statements.split_off(idx+1);
                 let orig_stmt = bb.statements.pop().unwrap();
-                let (lhs, rhs) = match orig_stmt.kind {
-                    StatementKind::Assign(ref lhs, ref rhs) => (lhs, rhs),
+                let (lhs, rhs, assign_op) = match orig_stmt.kind {
+                    StatementKind::Assign(ref lhs, ref rhs, ref op) => (lhs, rhs, op),
                     _ => span_bug!(src_info.span, "expected assign, not {:?}", orig_stmt),
                 };
                 let (agg_kind, operands) = match rhs {
@@ -82,7 +82,7 @@ impl MirPass for Deaggregator {
                     }));
                     let new_statement = Statement {
                         source_info: src_info,
-                        kind: StatementKind::Assign(lhs_proj, rhs),
+                        kind: StatementKind::Assign(lhs_proj, rhs, assign_op.clone()),
                     };
                     debug!("inserting: {:?} @ {:?}", new_statement, idx + i);
                     bb.statements.push(new_statement);
@@ -113,7 +113,7 @@ fn get_aggregate_statement_index<'a, 'tcx, 'b>(start: usize,
     for i in start..statements.len() {
         let ref statement = statements[i];
         let rhs = match statement.kind {
-            StatementKind::Assign(_, ref rhs) => rhs,
+            StatementKind::Assign(_, ref rhs, _) => rhs,
             _ => continue,
         };
         let (kind, operands) = match rhs {

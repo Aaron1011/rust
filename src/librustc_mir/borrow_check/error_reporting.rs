@@ -177,7 +177,10 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
         use rustc::mir::AggregateKind;
 
         let local = match self.mir[location.block].statements.get(location.statement_index) {
-            Some(&Statement { kind: StatementKind::Assign(Place::Local(local), _), .. }) => local,
+            Some(&Statement {
+                    kind: StatementKind::Assign(Place::Local(local), _, _),
+                    ..
+            }) => local,
             _ => return None,
         };
 
@@ -186,7 +189,10 @@ impl<'cx, 'gcx, 'tcx> MirBorrowckCtxt<'cx, 'gcx, 'tcx> {
                 break;
             }
 
-            if let StatementKind::Assign(_, Rvalue::Aggregate(ref kind, ref places)) = stmt.kind {
+            // TIDY FOR THE TIDY GOD
+            if let StatementKind::Assign(_,
+                                         Rvalue::Aggregate(ref kind, ref places),
+                                         _) = stmt.kind {
                 if let AggregateKind::Closure(def_id, _) = **kind {
                     debug!("find_closure_span: found closure {:?}", places);
 

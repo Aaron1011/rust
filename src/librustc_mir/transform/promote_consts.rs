@@ -180,7 +180,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
                 span,
                 scope: ARGUMENT_VISIBILITY_SCOPE
             },
-            kind: StatementKind::Assign(Place::Local(dest), rvalue)
+            kind: StatementKind::Assign(Place::Local(dest), rvalue, AssignmentOp::Normal)
         });
     }
 
@@ -218,7 +218,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
             let (mut rvalue, source_info) = {
                 let statement = &mut self.source[loc.block].statements[loc.statement_index];
                 let rhs = match statement.kind {
-                    StatementKind::Assign(_, ref mut rhs) => rhs,
+                    StatementKind::Assign(_, ref mut rhs, _) => rhs,
                     _ => {
                         span_bug!(statement.source_info.span, "{:?} is not an assignment",
                                   statement);
@@ -297,7 +297,7 @@ impl<'a, 'tcx> Promoter<'a, 'tcx> {
             Candidate::Ref(Location { block: bb, statement_index: stmt_idx }) => {
                 let ref mut statement = self.source[bb].statements[stmt_idx];
                 match statement.kind {
-                    StatementKind::Assign(_, ref mut rvalue) => {
+                    StatementKind::Assign(_, ref mut rvalue, _) => {
                         mem::replace(rvalue, Rvalue::Use(new_operand))
                     }
                     _ => bug!()
@@ -345,7 +345,7 @@ pub fn promote_candidates<'a, 'tcx>(mir: &mut Mir<'tcx>,
             Candidate::Ref(Location { block: bb, statement_index: stmt_idx }) => {
                 let statement = &mir[bb].statements[stmt_idx];
                 let dest = match statement.kind {
-                    StatementKind::Assign(ref dest, _) => dest,
+                    StatementKind::Assign(ref dest, _, _) => dest,
                     _ => {
                         span_bug!(statement.source_info.span,
                                   "expected assignment to promote");
@@ -406,7 +406,7 @@ pub fn promote_candidates<'a, 'tcx>(mir: &mut Mir<'tcx>,
     for block in mir.basic_blocks_mut() {
         block.statements.retain(|statement| {
             match statement.kind {
-                StatementKind::Assign(Place::Local(index), _) |
+                StatementKind::Assign(Place::Local(index), _, _) |
                 StatementKind::StorageLive(index) |
                 StatementKind::StorageDead(index) => {
                     !promoted(index)

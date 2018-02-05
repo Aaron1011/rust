@@ -82,13 +82,15 @@ impl Lower128Bit {
                         source_info,
                         kind: StatementKind::Assign(
                             place,
-                            Rvalue::BinaryOp(_, lhs, rhs))
+                            Rvalue::BinaryOp(_, lhs, rhs),
+                            AssignmentOp::Normal)
                     } => (source_info, place, lhs, rhs),
                     Statement {
                         source_info,
                         kind: StatementKind::Assign(
                             place,
-                            Rvalue::CheckedBinaryOp(_, lhs, rhs))
+                            Rvalue::CheckedBinaryOp(_, lhs, rhs),
+                            AssignmentOp::Normal)
                     } => (source_info, place, lhs, rhs),
                     _ => bug!("Statement doesn't match pattern any more?"),
                 };
@@ -105,7 +107,8 @@ impl Lower128Bit {
                             Rvalue::Cast(
                                 CastKind::Misc,
                                 rhs,
-                                rhs_override_ty.unwrap())),
+                                rhs_override_ty.unwrap()),
+                            AssignmentOp::Normal),
                     });
                     rhs = Operand::Move(Place::Local(local));
                 }
@@ -161,13 +164,13 @@ fn lower_to<'a, 'tcx, D>(statement: &Statement<'tcx>, local_decls: &D, tcx: TyCt
     where D: HasLocalDecls<'tcx>
 {
     match statement.kind {
-        StatementKind::Assign(_, Rvalue::BinaryOp(bin_op, ref lhs, _)) => {
+        StatementKind::Assign(_, Rvalue::BinaryOp(bin_op, ref lhs, _), _) => {
             let ty = lhs.ty(local_decls, tcx);
             if let Some(is_signed) = sign_of_128bit(ty) {
                 return item_for_op(bin_op, is_signed);
             }
         },
-        StatementKind::Assign(_, Rvalue::CheckedBinaryOp(bin_op, ref lhs, _)) => {
+        StatementKind::Assign(_, Rvalue::CheckedBinaryOp(bin_op, ref lhs, _), _) => {
             let ty = lhs.ty(local_decls, tcx);
             if let Some(is_signed) = sign_of_128bit(ty) {
                 return item_for_checked_op(bin_op, is_signed);

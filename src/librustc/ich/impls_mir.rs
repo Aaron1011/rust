@@ -236,9 +236,10 @@ for mir::StatementKind<'gcx> {
         mem::discriminant(self).hash_stable(hcx, hasher);
 
         match *self {
-            mir::StatementKind::Assign(ref place, ref rvalue) => {
+            mir::StatementKind::Assign(ref place, ref rvalue, ref op) => {
                 place.hash_stable(hcx, hasher);
                 rvalue.hash_stable(hcx, hasher);
+                op.hash_stable(hcx, hasher);
             }
             mir::StatementKind::SetDiscriminant { ref place, variant_index } => {
                 place.hash_stable(hcx, hasher);
@@ -281,6 +282,7 @@ impl<'gcx, T> HashStable<StableHashingContext<'gcx>>
 }
 
 impl_stable_hash_for!(enum mir::ValidationOp { Acquire, Release, Suspend(region_scope) });
+impl_stable_hash_for!(enum mir::AssignmentOp { Normal, UncheckedSubtype });
 
 impl<'gcx> HashStable<StableHashingContext<'gcx>> for mir::Place<'gcx> {
     fn hash_stable<W: StableHasherResult>(&self,

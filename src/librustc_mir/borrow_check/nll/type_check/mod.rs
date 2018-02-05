@@ -716,20 +716,22 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         self.infcx.tcx
     }
 
-    fn skip_assign_sub(&mut self, mir: &Mir<'tcx>, location: Location) -> bool {
-        let result = mir.self_borrows.iter().find(|l| l == &&location).is_some();
-        debug!("skip_assign_sub: {}", result);
-        result
+    fn skip_assign_sub(&mut self, location: Location, op: &AssignmentOp) -> bool {
+        debug!("skip_assign_sub: {:?}", op);
+        match op {
+            &AssignmentOp::Normal => false,
+            &AssignmentOp::UncheckedSubtype => true
+        }
     }
 
     fn check_stmt(&mut self, mir: &Mir<'tcx>, stmt: &Statement<'tcx>, location: Location) {
         debug!("check_stmt: {:?}", stmt);
         let tcx = self.tcx();
         match stmt.kind {
-            StatementKind::Assign(ref place, ref rv) => {
+            StatementKind::Assign(ref place, ref rv, ref op) => {
                 let place_ty = place.ty(mir, tcx).to_ty(tcx);
                 let rv_ty = rv.ty(mir, tcx);
-                if !self.skip_assign_sub(mir, location) {
+                if !self.skip_assign_sub(location, op) {
                     if let Err(terr) =
                         self.sub_types(rv_ty, place_ty, location.at_successor_within_block())
                     {

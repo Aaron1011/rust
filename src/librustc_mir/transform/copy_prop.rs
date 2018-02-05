@@ -123,7 +123,7 @@ impl MirPass for CopyPropagation {
 
                     // That use of the source must be an assignment.
                     match statement.kind {
-                        StatementKind::Assign(Place::Local(local), Rvalue::Use(ref operand)) if
+                        StatementKind::Assign(Place::Local(local), Rvalue::Use(ref operand), _) if
                                 local == dest_local => {
                             let maybe_action = match *operand {
                                 Operand::Copy(ref src_place) |
@@ -175,10 +175,12 @@ fn eliminate_self_assignments<'tcx>(
                     StatementKind::Assign(
                         Place::Local(local),
                         Rvalue::Use(Operand::Copy(Place::Local(src_local))),
+                        _
                     ) |
                     StatementKind::Assign(
                         Place::Local(local),
                         Rvalue::Use(Operand::Move(Place::Local(src_local))),
+                        _
                     ) if local == dest_local && dest_local == src_local => {}
                     _ => {
                         continue;

@@ -77,6 +77,9 @@ impl<'tcx> CFG<'tcx> {
 
         let statement_index = self.block_data(block).statements.len();
 
+
+        let mut op = AssignmentOp::Normal;
+
         if let Some(ref mut capture_data) = self.capture_stack.last_mut() {
             match &rvalue {
                 &Rvalue::Ref(_, _, Place::Projection(box Projection {
@@ -84,22 +87,27 @@ impl<'tcx> CFG<'tcx> {
                     elem: ProjectionElem::Deref
                 })) => {
                     if orig_place == &capture_data.orig_place {
+
+                        debug!("push_assign(block={:?}, source_info={:?}, place={:?}, rvalue={:?}
+                        ): Generating UncheckedSubtype op", block, source_info, place, rvalue);
+
+                        op = AssignmentOp::UncheckedSubtype;
+
                         // We're about to push a statement, so its statement
                         // index will be the current length of 'statements'
-                        capture_data.reborrows.insert(Location {
+                        /*capture_data.reborrows.insert(Location {
                             block,
                             statement_index
-                        });
+                        });*/
                     }
                 },
                 _ => {}
             }
-            
         }
 
         self.push(block, Statement {
             source_info,
-            kind: StatementKind::Assign(place.clone(), rvalue)
+            kind: StatementKind::Assign(place.clone(), rvalue, op)
         });
     }
 

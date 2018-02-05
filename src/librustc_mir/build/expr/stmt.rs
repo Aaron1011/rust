@@ -41,7 +41,7 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                     // we want to prevent the lifetimes of reborrows
                     // occuring in the rhs from being artificailly extend
                     //
-                    // TODO: Can we detect if the lhs is a mutable 'let'?
+                    // FIXME: Can we detect if the lhs is a mutable 'let'?
                     // if so, we can skip running capturing, since there
                     // will never be any assignments
                     TyRef(_, _) => true,
@@ -73,8 +73,8 @@ impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
                 };
 
                 if do_captures {
-                    let captures = this.stop_self_assign(&lhs_place);
-                    this.self_borrows.extend(captures.reborrows)
+                    /*let captures = */this.stop_self_assign(&lhs_place);
+                    //this.self_borrows.extend(captures.reborrows)
                 }
 
                 result

@@ -100,7 +100,7 @@ impl<'a, 'tcx, M: Machine<'tcx>> EvalContext<'a, 'tcx, M> {
         let frame_idx = self.cur_frame();
 
         match stmt.kind {
-            Assign(ref place, ref rvalue) => self.eval_rvalue_into_place(rvalue, place)?,
+            Assign(ref place, ref rvalue, _) => self.eval_rvalue_into_place(rvalue, place)?,
 
             SetDiscriminant {
                 ref place,

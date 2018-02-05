@@ -1127,7 +1127,7 @@ impl<'tcx> Statement<'tcx> {
 #[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
 pub enum StatementKind<'tcx> {
     /// Write the RHS Rvalue to the LHS Place.
-    Assign(Place<'tcx>, Rvalue<'tcx>),
+    Assign(Place<'tcx>, Rvalue<'tcx>, AssignmentOp),
 
     /// Write the discriminant for a variant to the enum Place.
     SetDiscriminant { place: Place<'tcx>, variant_index: usize },
@@ -1156,6 +1156,18 @@ pub enum StatementKind<'tcx> {
 
     /// No-op. Useful for deleting instructions without affecting statement indices.
     Nop,
+}
+
+#[derive(Copy, Clone, RustcEncodable, RustcDecodable, PartialEq, Eq, Debug)]
+pub enum AssignmentOp {
+
+    Normal,
+
+    /// Causes generation of a subtype relationship
+    /// between the lhs and rhs to be skipped. Only
+    /// generated when it can be proven that it is safe to do so
+    UncheckedSubtype
+
 }
 
 /// The `ValidationOp` describes what happens with each of the operands of a
@@ -1213,7 +1225,7 @@ impl<'tcx> Debug for Statement<'tcx> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         use self::StatementKind::*;
         match self.kind {
-            Assign(ref place, ref rv) => write!(fmt, "{:?} = {:?}", place, rv),
+            Assign(ref place, ref rv, ref op) => write!(fmt, "{:?} = {:?} ({:?})", place, rv, op),
             // (reuse lifetime rendering policy from ppaux.)
             EndRegion(ref ce) => write!(fmt, "EndRegion({})", ty::ReScope(*ce)),
             Validate(ref op, ref places) => write!(fmt, "Validate({:?}, {:?})", op, places),
@@ -2076,7 +2088,9 @@ impl<'tcx> TypeFoldable<'tcx> for Statement<'tcx> {
         use mir::StatementKind::*;
 
         let kind = match self.kind {
-            Assign(ref place, ref rval) => Assign(place.fold_with(folder), rval.fold_with(folder)),
+            Assign(ref place, ref rval, ref op) => {
+                Assign(place.fold_with(folder), rval.fold_with(folder), op.clone())
+            },
             SetDiscriminant { ref place, variant_index } => SetDiscriminant {
                 place: place.fold_with(folder),
                 variant_index,
@@ -2111,7 +2125,9 @@ impl<'tcx> TypeFoldable<'tcx> for Statement<'tcx> {
         use mir::StatementKind::*;
 
         match self.kind {
-            Assign(ref place, ref rval) => { place.visit_with(visitor) || rval.visit_with(visitor) }
+            Assign(ref place, ref rval, ref _op) => {
+                place.visit_with(visitor) || rval.visit_with(visitor)
+            },
             SetDiscriminant { ref place, .. } => place.visit_with(visitor),
             StorageLive(ref local) |
             StorageDead(ref local) => local.visit_with(visitor),

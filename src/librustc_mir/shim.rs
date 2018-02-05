@@ -391,7 +391,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
         let ret_statement = self.make_statement(
             StatementKind::Assign(
                 Place::Local(RETURN_PLACE),
-                Rvalue::Use(Operand::Copy(rcvr))
+                Rvalue::Use(Operand::Copy(rcvr)),
+                AssignmentOp::Normal,
             )
         );
         self.block(vec![ret_statement], TerminatorKind::Return, false);
@@ -447,7 +448,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
         let statement = self.make_statement(
             StatementKind::Assign(
                 ref_loc.clone(),
-                Rvalue::Ref(tcx.types.re_erased, BorrowKind::Shared, rcvr_field)
+                Rvalue::Ref(tcx.types.re_erased, BorrowKind::Shared, rcvr_field),
+                AssignmentOp::Normal,
             )
         );
 
@@ -476,7 +478,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
         let compute_cond = self.make_statement(
             StatementKind::Assign(
                 cond.clone(),
-                Rvalue::BinaryOp(BinOp::Ne, Operand::Copy(end), Operand::Copy(beg))
+                Rvalue::BinaryOp(BinOp::Ne, Operand::Copy(end), Operand::Copy(beg)),
+                AssignmentOp::Normal,
             )
         );
 
@@ -519,13 +522,15 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
             self.make_statement(
                 StatementKind::Assign(
                     Place::Local(beg),
-                    Rvalue::Use(Operand::Constant(self.make_usize(0)))
+                    Rvalue::Use(Operand::Constant(self.make_usize(0))),
+                    AssignmentOp::Normal,
                 )
             ),
             self.make_statement(
                 StatementKind::Assign(
                     end.clone(),
-                    Rvalue::Use(Operand::Constant(self.make_usize(len)))
+                    Rvalue::Use(Operand::Constant(self.make_usize(len))),
+                    AssignmentOp::Normal
                 )
             )
         ];
@@ -553,7 +558,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
             self.make_statement(
                 StatementKind::Assign(
                     ret_field,
-                    Rvalue::Use(Operand::Move(cloned))
+                    Rvalue::Use(Operand::Move(cloned)),
+                    AssignmentOp::Normal
                 )
             ),
             self.make_statement(
@@ -563,7 +569,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
                         BinOp::Add,
                         Operand::Copy(Place::Local(beg)),
                         Operand::Constant(self.make_usize(1))
-                    )
+                    ),
+                    AssignmentOp::Normal
                 )
             )
         ];
@@ -575,6 +582,7 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
             StatementKind::Assign(
                 Place::Local(RETURN_PLACE),
                 Rvalue::Use(Operand::Move(ret.clone())),
+                AssignmentOp::Normal
             )
         );
         self.block(vec![ret_statement], TerminatorKind::Return, false);
@@ -588,7 +596,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
         let init = self.make_statement(
             StatementKind::Assign(
                 Place::Local(beg),
-                Rvalue::Use(Operand::Constant(self.make_usize(0)))
+                Rvalue::Use(Operand::Constant(self.make_usize(0))),
+                AssignmentOp::Normal
             )
         );
         self.block(vec![init], TerminatorKind::Goto { target: BasicBlock::new(6) }, true);
@@ -619,7 +628,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
                     BinOp::Add,
                     Operand::Copy(Place::Local(beg)),
                     Operand::Constant(self.make_usize(1))
-                )
+                ),
+                AssignmentOp::Normal
             )
         );
         self.block(vec![statement], TerminatorKind::Goto { target: BasicBlock::new(6) }, true);
@@ -673,7 +683,8 @@ impl<'a, 'tcx> CloneShimBuilder<'a, 'tcx> {
                 Rvalue::Aggregate(
                     box kind,
                     returns.into_iter().map(Operand::Move).collect()
-                )
+                ),
+                AssignmentOp::Normal
             )
         );
         self.block(vec![ret_statement], TerminatorKind::Return, false);
@@ -727,7 +738,8 @@ fn build_call_shim<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                 source_info,
                 kind: StatementKind::Assign(
                     Place::Local(ref_rcvr),
-                    Rvalue::Ref(tcx.types.re_erased, BorrowKind::Mut, rcvr_l)
+                    Rvalue::Ref(tcx.types.re_erased, BorrowKind::Mut, rcvr_l),
+                    AssignmentOp::Normal
                 )
             });
             Operand::Move(Place::Local(ref_rcvr))
@@ -877,7 +889,8 @@ pub fn build_adt_ctor<'a, 'gcx, 'tcx>(infcx: &infer::InferCtxt<'a, 'gcx, 'tcx>,
                     (1..sig.inputs().len()+1).map(|i| {
                         Operand::Move(Place::Local(Local::new(i)))
                     }).collect()
-                )
+                ),
+                AssignmentOp::Normal
             )
         }],
         terminator: Some(Terminator {

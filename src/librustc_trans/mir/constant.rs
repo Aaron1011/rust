@@ -324,7 +324,7 @@ impl<'a, 'tcx> MirConstContext<'a, 'tcx> {
             for statement in &data.statements {
                 let span = statement.source_info.span;
                 match statement.kind {
-                    mir::StatementKind::Assign(ref dest, ref rvalue) => {
+                    mir::StatementKind::Assign(ref dest, ref rvalue, _) => {
                         let ty = dest.ty(self.mir, tcx);
                         let ty = self.monomorphize(&ty).to_ty(tcx);
                         let value = self.const_rvalue(rvalue, ty, span);

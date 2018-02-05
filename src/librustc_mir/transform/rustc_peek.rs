@@ -155,7 +155,7 @@ fn each_block<'a, 'tcx, O>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     for (j, stmt) in statements.iter().enumerate() {
         debug!("rustc_peek: ({:?},{}) {:?}", bb, j, stmt);
         let (place, rvalue) = match stmt.kind {
-            mir::StatementKind::Assign(ref place, ref rvalue) => {
+            mir::StatementKind::Assign(ref place, ref rvalue, _) => {
                 (place, rvalue)
             }
             mir::StatementKind::StorageLive(_) |

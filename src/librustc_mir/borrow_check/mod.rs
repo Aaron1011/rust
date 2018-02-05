@@ -347,7 +347,7 @@ impl<'cx, 'gcx, 'tcx> DataflowResultsConsumer<'cx, 'tcx> for MirBorrowckCtxt<'cx
         self.check_activations(location, span, flow_state);
 
         match stmt.kind {
-            StatementKind::Assign(ref lhs, ref rhs) => {
+            StatementKind::Assign(ref lhs, ref rhs, ref _op) => {
                 self.mutate_place(
                     ContextKind::AssignLhs.new(location),
                     (lhs, span),

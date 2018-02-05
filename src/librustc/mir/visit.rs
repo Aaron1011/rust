@@ -109,8 +109,9 @@ macro_rules! make_mir_visitor {
                             block: BasicBlock,
                             place: & $($mutability)* Place<'tcx>,
                             rvalue: & $($mutability)* Rvalue<'tcx>,
+                            op: & $($mutability)* AssignmentOp,
                             location: Location) {
-                self.super_assign(block, place, rvalue, location);
+                self.super_assign(block, place, rvalue, op, location);
             }
 
             fn visit_terminator(&mut self,
@@ -358,8 +359,9 @@ macro_rules! make_mir_visitor {
                 self.visit_source_info(source_info);
                 match *kind {
                     StatementKind::Assign(ref $($mutability)* place,
-                                          ref $($mutability)* rvalue) => {
-                        self.visit_assign(block, place, rvalue, location);
+                                          ref $($mutability)* rvalue,
+                                          ref $($mutability)* op) => {
+                        self.visit_assign(block, place, rvalue, op, location);
                     }
                     StatementKind::EndRegion(_) => {}
                     StatementKind::Validate(_, ref $($mutability)* places) => {
@@ -397,6 +399,7 @@ macro_rules! make_mir_visitor {
                             _block: BasicBlock,
                             place: &$($mutability)* Place<'tcx>,
                             rvalue: &$($mutability)* Rvalue<'tcx>,
+                            _op: &$($mutability)* AssignmentOp,
                             location: Location) {
                 self.visit_place(place, PlaceContext::Store, location);
                 self.visit_rvalue(rvalue, location);

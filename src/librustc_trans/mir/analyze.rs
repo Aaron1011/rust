@@ -90,6 +90,7 @@ impl<'mir, 'a, 'tcx> Visitor<'tcx> for LocalAnalyzer<'mir, 'a, 'tcx> {
                     block: mir::BasicBlock,
                     place: &mir::Place<'tcx>,
                     rvalue: &mir::Rvalue<'tcx>,
+                    _op: &mir::AssignmentOp,
                     location: Location) {
         debug!("visit_assign(block={:?}, place={:?}, rvalue={:?})", block, place, rvalue);
 
