@@ -32,6 +32,7 @@ use super::{on_lookup_result_bits, for_location_inits};
 mod storage_liveness;
 
 pub use self::storage_liveness::*;
+pub use self::borrows::GatherBorrows;
 
 #[allow(dead_code)]
 pub(super) mod borrows;

@@ -37,7 +37,7 @@ use dataflow::MoveDataParamEnv;
 use dataflow::{DataflowAnalysis, DataflowResultsConsumer};
 use dataflow::{MaybeInitializedPlaces, MaybeUninitializedPlaces};
 use dataflow::{EverInitializedPlaces, MovingOutStatements};
-use dataflow::{BorrowData, Borrows, ReserveOrActivateIndex};
+use dataflow::{BorrowData, Borrows, ReserveOrActivateIndex, GatherBorrows};
 use dataflow::{ActiveBorrows, Reservations};
 use dataflow::indexes::BorrowIndex;
 use dataflow::move_paths::{IllegalMoveOriginKind, MoveError};
@@ -153,6 +153,8 @@ fn do_mir_borrowck<'a, 'gcx, 'tcx>(
         _ => Some(tcx.hir.body_owned_by(id)),
     };
 
+    let gather_borrows = GatherBorrows::new(tcx, mir);
+
     let dead_unwinds = IdxSetBuf::new_empty(mir.basic_blocks().len());
     let mut flow_inits = FlowAtLocation::new(do_dataflow(
         tcx,
@@ -201,6 +203,7 @@ fn do_mir_borrowck<'a, 'gcx, 'tcx>(
             param_env,
             &mut flow_inits,
             &mdpe.move_data,
+            &gather_borrows
         );
         (Some(Rc::new(regioncx)), opt_closure_req)
     } else {
@@ -234,7 +237,7 @@ fn do_mir_borrowck<'a, 'gcx, 'tcx>(
         nonlexical_regioncx: opt_regioncx.clone(),
     };
 
-    let borrows = Borrows::new(tcx, mir, opt_regioncx, def_id, body_id);
+    let borrows = Borrows::new(tcx, mir, opt_regioncx, def_id, body_id, gather_borrows);
     let flow_reservations = do_dataflow(
         tcx,
         mir,

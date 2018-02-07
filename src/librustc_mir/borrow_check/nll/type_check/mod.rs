@@ -11,17 +11,19 @@
 //! This pass type-checks the MIR to ensure it is not broken.
 #![allow(unreachable_code)]
 
-use borrow_check::nll::region_infer::Cause;
-use borrow_check::nll::region_infer::ClosureRegionRequirementsExt;
+use borrow_check::nll::region_infer::{Cause, ConditionalConstraint};
+use borrow_check::nll::region_infer::{ClosureRegionRequirementsExt, Locations, OutlivesSet};
 use borrow_check::nll::universal_regions::UniversalRegions;
 use dataflow::FlowAtLocation;
 use dataflow::MaybeInitializedPlaces;
+use dataflow::GatherBorrows;
 use dataflow::move_paths::MoveData;
 use rustc::hir::def_id::DefId;
 use rustc::infer::{InferCtxt, InferOk, InferResult, LateBoundRegionConversionTime, UnitResult};
 use rustc::infer::region_constraints::{GenericKind, RegionConstraintData};
 use rustc::traits::{self, FulfillmentContext};
 use rustc::ty::error::TypeError;
+use rustc::ty::relate::RelateResult;
 use rustc::ty::fold::TypeFoldable;
 use rustc::ty::{self, ToPolyTraitRef, Ty, TyCtxt, TypeVariants};
 use rustc::middle::const_val::ConstVal;
@@ -93,15 +95,16 @@ mod input_output;
 ///   constraints for the regions in the types of variables
 /// - `flow_inits` -- results of a maybe-init dataflow analysis
 /// - `move_data` -- move-data constructed when performing the maybe-init dataflow analysis
-pub(crate) fn type_check<'gcx, 'tcx>(
-    infcx: &InferCtxt<'_, 'gcx, 'tcx>,
+pub(crate) fn type_check<'a, 'gcx, 'tcx>(
+    infcx: &InferCtxt<'a, 'gcx, 'tcx>,
     param_env: ty::ParamEnv<'gcx>,
     mir: &Mir<'tcx>,
     mir_def_id: DefId,
     universal_regions: &UniversalRegions<'tcx>,
     liveness: &LivenessResults,
-    flow_inits: &mut FlowAtLocation<MaybeInitializedPlaces<'_, 'gcx, 'tcx>>,
+    flow_inits: &mut FlowAtLocation<MaybeInitializedPlaces<'a, 'gcx, 'tcx>>,
     move_data: &MoveData<'tcx>,
+    gather_borrows: &GatherBorrows<'a, 'gcx, 'tcx>
 ) -> MirTypeckRegionConstraints<'tcx> {
     let body_id = infcx.tcx.hir.as_local_node_id(mir_def_id).unwrap();
     let implicit_region_bound = infcx.tcx.mk_region(ty::ReVar(universal_regions.fr_fn_body));
@@ -112,6 +115,7 @@ pub(crate) fn type_check<'gcx, 'tcx>(
         mir,
         &universal_regions.region_bound_pairs,
         Some(implicit_region_bound),
+        gather_borrows,
         &mut |cx| {
             liveness::generate(cx, mir, liveness, flow_inits, move_data);
 
@@ -120,14 +124,15 @@ pub(crate) fn type_check<'gcx, 'tcx>(
     )
 }
 
-fn type_check_internal<'gcx, 'tcx>(
-    infcx: &InferCtxt<'_, 'gcx, 'tcx>,
+fn type_check_internal<'a, 'gcx, 'tcx>(
+    infcx: &'a InferCtxt<'a, 'gcx, 'tcx>,
     body_id: ast::NodeId,
     param_env: ty::ParamEnv<'gcx>,
     mir: &Mir<'tcx>,
-    region_bound_pairs: &[(ty::Region<'tcx>, GenericKind<'tcx>)],
+    region_bound_pairs: &'a [(ty::Region<'tcx>, GenericKind<'tcx>)],
     implicit_region_bound: Option<ty::Region<'tcx>>,
-    extra: &mut FnMut(&mut TypeChecker<'_, 'gcx, 'tcx>),
+    gather_borrows: &'a GatherBorrows<'a, 'gcx, 'tcx>,
+    extra: &mut FnMut(&mut TypeChecker<'a, 'gcx, 'tcx>),
 ) -> MirTypeckRegionConstraints<'tcx> {
     let mut checker = TypeChecker::new(
         infcx,
@@ -135,6 +140,7 @@ fn type_check_internal<'gcx, 'tcx>(
         param_env,
         region_bound_pairs,
         implicit_region_bound,
+        gather_borrows
     );
     let errors_reported = {
         let mut verifier = TypeVerifier::new(&mut checker, mir);
@@ -587,6 +593,7 @@ struct TypeChecker<'a, 'gcx: 'a + 'tcx, 'tcx: 'a> {
     implicit_region_bound: Option<ty::Region<'tcx>>,
     reported_errors: FxHashSet<(Ty<'tcx>, Span)>,
     constraints: MirTypeckRegionConstraints<'tcx>,
+    gather_borrows: &'a GatherBorrows<'a, 'gcx, 'tcx>
 }
 
 /// A collection of region constraints that must be satisfied for the
@@ -606,32 +613,11 @@ pub(crate) struct MirTypeckRegionConstraints<'tcx> {
     /// constraints due to performing subtyping operations or solving
     /// traits. These are accumulated into this vector for later use.
     pub outlives_sets: Vec<OutlivesSet<'tcx>>,
+
+    pub conditional_constraints: Vec<ConditionalConstraint<'tcx>>
 }
 
-/// Outlives relationships between regions and types created at a
-/// particular point within the control-flow graph.
-pub struct OutlivesSet<'tcx> {
-    /// The locations associated with these constraints.
-    pub locations: Locations,
 
-    /// Constraints generated. In terms of the NLL RFC, when you have
-    /// a constraint `R1: R2 @ P`, the data in there specifies things
-    /// like `R1: R2`.
-    pub data: RegionConstraintData<'tcx>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Locations {
-    /// The location in the MIR that generated these constraints.
-    /// This is intended for error reporting and diagnosis; the
-    /// constraints may *take effect* at a distinct spot.
-    pub from_location: Location,
-
-    /// The constraints must be met at this location. In terms of the
-    /// NLL RFC, when you have a constraint `R1: R2 @ P`, this field
-    /// is the `P` value.
-    pub at_location: Location,
-}
 
 impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
     fn new(
@@ -640,6 +626,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         param_env: ty::ParamEnv<'gcx>,
         region_bound_pairs: &'a [(ty::Region<'tcx>, GenericKind<'tcx>)],
         implicit_region_bound: Option<ty::Region<'tcx>>,
+        gather_borrows: &'a GatherBorrows<'a, 'gcx, 'tcx>
     ) -> Self {
         TypeChecker {
             infcx,
@@ -650,6 +637,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
             implicit_region_bound,
             reported_errors: FxHashSet(),
             constraints: MirTypeckRegionConstraints::default(),
+            gather_borrows
         }
     }
 
@@ -660,8 +648,9 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
     fn fully_perform_op<OP, R>(
         &mut self,
         locations: Locations,
+        save_constraints: bool,
         op: OP,
-    ) -> Result<R, TypeError<'tcx>>
+    ) -> Result<(R, RegionConstraintData<'tcx>), TypeError<'tcx>>
     where
         OP: FnOnce(&mut Self) -> InferResult<'tcx, R>,
     {
@@ -680,15 +669,15 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         );
 
         let data = self.infcx.take_and_reset_region_constraints();
-        if !data.is_empty() {
+        if !data.is_empty() && save_constraints {
             debug!("fully_perform_op: constraints generated at {:?} are {:#?}",
                    locations, data);
             self.constraints
                 .outlives_sets
-                .push(OutlivesSet { locations, data });
+                .push(OutlivesSet { locations, data: data.clone() });
         }
 
-        Ok(value)
+        Ok((value, data))
     }
 
     fn sub_types(
@@ -696,24 +685,95 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         sub: Ty<'tcx>,
         sup: Ty<'tcx>,
         locations: Locations,
-    ) -> UnitResult<'tcx> {
-        self.fully_perform_op(locations, |this| {
+        save_constraints: bool
+    ) -> RelateResult<'tcx, RegionConstraintData<'tcx>> {
+        self.fully_perform_op(locations, save_constraints, |this| {
             this.infcx
                 .at(&this.misc(this.last_span), this.param_env)
                 .sup(sup, sub)
-        })
+        }).map(|r| r.1)
     }
 
     fn eq_types(&mut self, a: Ty<'tcx>, b: Ty<'tcx>, locations: Locations) -> UnitResult<'tcx> {
-        self.fully_perform_op(locations, |this| {
+        self.fully_perform_op(locations, true, |this| {
             this.infcx
                 .at(&this.misc(this.last_span), this.param_env)
                 .eq(b, a)
-        })
+        }).map(|r| r.0)
     }
 
     fn tcx(&self) -> TyCtxt<'a, 'gcx, 'tcx> {
         self.infcx.tcx
+    }
+
+    fn handle_self_assign(&mut self, mir: &Mir<'tcx>, lhs: &Place<'tcx>, rhs: &Rvalue<'tcx>, location: Location) -> bool {
+        let local = match lhs {
+            &Place::Local(local) => local,
+            _ => return false
+        };
+
+        let tcx = self.tcx();
+
+        match lhs.ty(mir, tcx).to_ty(tcx).sty {
+            ty::TyRef(_, _) => {},
+            _ => return false
+        }
+
+        let locations = location.at_successor_within_block();
+        let lhs_ty = lhs.ty(mir, tcx).to_ty(tcx);
+        let rhs_ty = rhs.ty(mir, tcx);
+
+
+        //let orig_data = self.sub_types(rhs_ty, lhs_ty, location.at_successor_within_block(), false).unwrap();
+
+        let orig_constraints = self.sub_types(rhs_ty, lhs_ty, locations, false).expect("Error");
+
+        let reborrow = Place::Local(local.clone()).deref();
+        let mut to_check = Vec::new();
+
+        debug!("handle_self_assign(lhs={:?}, rhs={:?}, location={:?}): checking borrows", lhs, rhs, locations);
+        debug!("handle_self_assign: All borrows: {:?}", self.gather_borrows.idx_vec);
+
+        for (borrow_index, borrow_data) in self.gather_borrows.idx_vec.iter_enumerated() {
+
+            // For each reborrow of the place we're originally assigning to
+            if borrow_data.borrowed_place == reborrow {
+                let borrow_ty = borrow_data.orig_rvalue.ty(mir, tcx);
+
+                debug!("handle_self_assign: adding delayed constraint for ({:?}, {:?}): {:?}",
+                        borrow_index, borrow_data, borrow_ty);
+
+                // We want to see if our rhs was derived from the borrow. If it was,
+                // then it's safe to store the derived type back in the lhs.
+                // If the rhs was derived from the borrow, than the borrow will outlive
+                // it (rhs was either assigned wfrom the borrow, or assigned to from
+                // some method on the borrow). In 
+                //
+                // borrow_ty is the first parameter, since we want to see if
+                // outlives rhs_ty
+                match self.sub_types(borrow_ty, rhs_ty, locations, false) {
+                    Ok(data) => to_check.push(OutlivesSet { locations: locations, data }),
+                    _ => {}
+                }
+            }
+        }
+
+        if to_check.is_empty() {
+            return false
+        }
+
+        let conditional = ConditionalConstraint {
+            orig: OutlivesSet {
+                locations,
+                data: orig_constraints
+            },
+            to_check
+        };
+
+        debug!("handle_self_assign: final conditional = {:?}", conditional);
+
+        self.constraints.conditional_constraints.push(conditional);
+        true
     }
 
     fn check_stmt(&mut self, mir: &Mir<'tcx>, stmt: &Statement<'tcx>, location: Location) {
@@ -721,21 +781,23 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         let tcx = self.tcx();
         match stmt.kind {
             StatementKind::Assign(ref place, ref rv) => {
-                let place_ty = place.ty(mir, tcx).to_ty(tcx);
-                let rv_ty = rv.ty(mir, tcx);
-                if let Err(terr) =
-                    self.sub_types(rv_ty, place_ty, location.at_successor_within_block())
-                {
-                    span_mirbug!(
-                        self,
-                        stmt,
-                        "bad assignment ({:?} = {:?}): {:?}",
-                        place_ty,
-                        rv_ty,
-                        terr
-                    );
+                if !self.handle_self_assign(mir, place, rv, location) {
+                    let place_ty = place.ty(mir, tcx).to_ty(tcx);
+                    let rv_ty = rv.ty(mir, tcx);
+                    if let Err(terr) =
+                        self.sub_types(rv_ty, place_ty, location.at_successor_within_block(), true)
+                    {
+                        span_mirbug!(
+                            self,
+                            stmt,
+                            "bad assignment ({:?} = {:?}): {:?}",
+                            place_ty,
+                            rv_ty,
+                            terr
+                        );
+                    }
+                    self.check_rvalue(mir, rv, location);
                 }
-                self.check_rvalue(mir, rv, location);
             }
             StatementKind::SetDiscriminant {
                 ref place,
@@ -804,7 +866,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                     from_location: term_location,
                     at_location: target.start_location(),
                 };
-                if let Err(terr) = self.sub_types(rv_ty, place_ty, locations) {
+                if let Err(terr) = self.sub_types(rv_ty, place_ty, locations, true) {
                     span_mirbug!(
                         self,
                         term,
@@ -823,7 +885,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                         from_location: term_location,
                         at_location: unwind.start_location(),
                     };
-                    if let Err(terr) = self.sub_types(rv_ty, place_ty, locations) {
+                    if let Err(terr) = self.sub_types(rv_ty, place_ty, locations, true) {
                         span_mirbug!(
                             self,
                             term,
@@ -841,7 +903,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                 ..
             } => {
                 let discr_ty = discr.ty(mir, tcx);
-                if let Err(terr) = self.sub_types(discr_ty, switch_ty, term_location.at_self()) {
+                if let Err(terr) = self.sub_types(discr_ty, switch_ty, term_location.at_self(), true) {
                     span_mirbug!(
                         self,
                         term,
@@ -922,7 +984,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                 match mir.yield_ty {
                     None => span_mirbug!(self, term, "yield in non-generator"),
                     Some(ty) => {
-                        if let Err(terr) = self.sub_types(value_ty, ty, term_location.at_self()) {
+                        if let Err(terr) = self.sub_types(value_ty, ty, term_location.at_self(), true) {
                             span_mirbug!(
                                 self,
                                 term,
@@ -954,7 +1016,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                     from_location: term_location,
                     at_location: target_block.start_location(),
                 };
-                if let Err(terr) = self.sub_types(sig.output(), dest_ty, locations) {
+                if let Err(terr) = self.sub_types(sig.output(), dest_ty, locations, true) {
                     span_mirbug!(
                         self,
                         term,
@@ -988,7 +1050,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         }
         for (n, (fn_arg, op_arg)) in sig.inputs().iter().zip(args).enumerate() {
             let op_arg_ty = op_arg.ty(mir, self.tcx());
-            if let Err(terr) = self.sub_types(op_arg_ty, fn_arg, term_location.at_self()) {
+            if let Err(terr) = self.sub_types(op_arg_ty, fn_arg, term_location.at_self(), true) {
                 span_mirbug!(
                     self,
                     term,
@@ -1060,7 +1122,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
             }
         };
 
-        if let Err(terr) = self.sub_types(arg_ty, pointee_ty, term_location.at_self()) {
+        if let Err(terr) = self.sub_types(arg_ty, pointee_ty, term_location.at_self(), true) {
             span_mirbug!(
                 self,
                 term,
@@ -1405,7 +1467,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
             };
             let operand_ty = operand.ty(mir, tcx);
             if let Err(terr) =
-                self.sub_types(operand_ty, field_ty, location.at_successor_within_block())
+                self.sub_types(operand_ty, field_ty, location.at_successor_within_block(), true)
             {
                 span_mirbug!(
                     self,
@@ -1498,7 +1560,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
             predicates,
             location
         );
-        self.fully_perform_op(location.at_self(), |this| {
+        self.fully_perform_op(location.at_self(), true, |this| {
             let cause = this.misc(this.last_span);
             let obligations = predicates
                 .iter()
@@ -1508,7 +1570,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                 value: (),
                 obligations,
             })
-        }).unwrap()
+        }).unwrap();
     }
 
     fn typeck_mir(&mut self, mir: &Mir<'tcx>) {
@@ -1542,13 +1604,13 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
         T: fmt::Debug + TypeFoldable<'tcx>,
     {
         debug!("normalize(value={:?}, location={:?})", value, location);
-        self.fully_perform_op(location.at_self(), |this| {
+        self.fully_perform_op(location.at_self(), true, |this| {
             let mut selcx = traits::SelectionContext::new(this.infcx);
             let cause = this.misc(this.last_span);
             let traits::Normalized { value, obligations } =
                 traits::normalize(&mut selcx, this.param_env, cause, value);
             Ok(InferOk { value, obligations })
-        }).unwrap()
+        }).unwrap().0
     }
 }
 
@@ -1567,7 +1629,7 @@ impl MirPass for TypeckMir {
         }
         let param_env = tcx.param_env(def_id);
         tcx.infer_ctxt().enter(|infcx| {
-            let _ = type_check_internal(&infcx, id, param_env, mir, &[], None, &mut |_| ());
+            let _ = type_check_internal(&infcx, id, param_env, mir, &[], None, &GatherBorrows::new(infcx.tcx, mir), &mut |_| ());
 
             // For verification purposes, we just ignore the resulting
             // region constraint sets. Not our problem. =)

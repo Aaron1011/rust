@@ -15,10 +15,9 @@ use rustc::infer::region_constraints::{Verify, VerifyBound};
 use rustc::ty;
 use syntax::codemap::Span;
 
-use super::region_infer::{TypeTest, RegionInferenceContext, RegionTest};
-use super::type_check::Locations;
+use super::region_infer::{TypeTest, RegionInferenceContext, RegionTest, Constraint as FinalConstraint};
 use super::type_check::MirTypeckRegionConstraints;
-use super::type_check::OutlivesSet;
+use super::region_infer::{OutlivesSet, Locations};
 
 /// When the MIR type-checker executes, it validates all the types in
 /// the MIR, and in the process generates a set of constraints that
@@ -43,6 +42,7 @@ impl<'cx, 'tcx> SubtypeConstraintGenerator<'cx, 'tcx> {
         let MirTypeckRegionConstraints {
             liveness_set,
             outlives_sets,
+            conditional_constraints
         } = constraints;
 
         debug!(
@@ -57,45 +57,89 @@ impl<'cx, 'tcx> SubtypeConstraintGenerator<'cx, 'tcx> {
             self.regioncx.add_live_point(region_vid, *location, &cause);
         }
 
-        for OutlivesSet { locations, data } in outlives_sets {
-            debug!("generate: constraints at: {:#?}", locations);
-            let RegionConstraintData {
-                constraints,
-                verifys,
-                givens,
-            } = data;
+        for conditional in conditional_constraints {
+            let mut final_stuff = Vec::new();
 
-            let span = self.mir.source_info(locations.from_location).span;
+            //let span = self.mir.source_info(conditional.orig.locations.from_location).span;
 
-            for constraint in constraints.keys() {
-                debug!("generate: constraint: {:?}", constraint);
-                let (a_vid, b_vid) = match constraint {
-                    Constraint::VarSubVar(a_vid, b_vid) => (*a_vid, *b_vid),
-                    Constraint::RegSubVar(a_r, b_vid) => (self.to_region_vid(a_r), *b_vid),
-                    Constraint::VarSubReg(a_vid, b_r) => (*a_vid, self.to_region_vid(b_r)),
-                    Constraint::RegSubReg(a_r, b_r) => {
-                        (self.to_region_vid(a_r), self.to_region_vid(b_r))
-                    }
-                };
-
-                // We have the constraint that `a_vid <= b_vid`. Add
-                // `b_vid: a_vid` to our region checker. Note that we
-                // reverse direction, because `regioncx` talks about
-                // "outlives" (`>=`) whereas the region constraints
-                // talk about `<=`.
-                self.regioncx
-                    .add_outlives(span, b_vid, a_vid, locations.at_location);
+            for outlives in conditional.to_check.iter() {
+                final_stuff.push(self.collect_outlives_constraints(outlives));
             }
 
-            for verify in verifys {
-                let type_test = self.verify_to_type_test(verify, span, locations);
-                self.regioncx.add_type_test(type_test);
-            }
+            let orig_constraints = self.collect_outlives_constraints(&conditional.orig);
 
-            assert!(
-                givens.is_empty(),
-                "MIR type-checker does not use givens (thank goodness)"
-            );
+            self.regioncx.add_conditional(orig_constraints, final_stuff);
+
+        }
+
+        for outlives in outlives_sets {
+            debug!("generate: constraints at: {:#?}", outlives.locations);
+            self.handle_outlives_set(outlives);
+
+        }
+    }
+
+    fn collect_outlives_constraints(&self, outlives: &OutlivesSet<'tcx>) -> Vec<FinalConstraint> {
+        let mut outlives_constraints = Vec::new();
+        let span = self.mir.source_info(outlives.locations.from_location).span;
+
+
+        for constraint in outlives.data.constraints.keys() {
+            let (sub, sup) = self.to_vids(constraint);
+            outlives_constraints.push(FinalConstraint {
+                span,
+                sup,
+                sub,
+                point: outlives.locations.at_location
+
+            });
+        }
+        outlives_constraints
+    }
+
+    fn handle_outlives_set(&mut self, outlives: &OutlivesSet<'tcx>) {
+        let OutlivesSet { locations, data} = outlives;
+
+        let RegionConstraintData {
+            constraints,
+            verifys,
+            givens,
+        } = data;
+
+        let span = self.mir.source_info(locations.from_location).span;
+
+        for constraint in constraints.keys() {
+            debug!("generate: constraint: {:?}", constraint);
+            let (a_vid, b_vid) = self.to_vids(&constraint);
+
+            // We have the constraint that `a_vid <= b_vid`. Add
+            // `b_vid: a_vid` to our region checker. Note that we
+            // reverse direction, because `regioncx` talks about
+            // "outlives" (`>=`) whereas the region constraints
+            // talk about `<=`.
+            self.regioncx
+                .add_outlives(span, b_vid, a_vid, locations.at_location);
+        }
+
+        for verify in verifys {
+            let type_test = self.verify_to_type_test(verify, span, locations);
+            self.regioncx.add_type_test(type_test);
+        }
+
+        assert!(
+            givens.is_empty(),
+            "MIR type-checker does not use givens (thank goodness)"
+        );
+    }
+
+    fn to_vids(&self, constraint: &Constraint<'tcx>) -> (ty::RegionVid, ty::RegionVid) { 
+        match constraint {
+            &Constraint::VarSubVar(ref a_vid, ref b_vid) => (*a_vid, *b_vid),
+            &Constraint::RegSubVar(ref a_r, ref b_vid) => (self.to_region_vid(a_r), *b_vid),
+            &Constraint::VarSubReg(ref a_vid, ref b_r) => (*a_vid, self.to_region_vid(b_r)),
+            &Constraint::RegSubReg(ref a_r, ref b_r) => {
+                (self.to_region_vid(a_r), self.to_region_vid(b_r))
+            }
         }
     }
 

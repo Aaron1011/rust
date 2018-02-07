@@ -81,7 +81,7 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
             output_ty
         );
         let mir_output_ty = mir.local_decls[RETURN_PLACE].ty;
-        let anon_type_map = self.fully_perform_op(start_position.at_self(), |cx| {
+        let anon_type_map = self.fully_perform_op(start_position.at_self(), true, |cx| {
             let mut obligations = ObligationAccumulator::default();
 
             let (output_ty, anon_type_map) = obligations.add(infcx.instantiate_anon_types(
@@ -140,15 +140,15 @@ impl<'a, 'gcx, 'tcx> TypeChecker<'a, 'gcx, 'tcx> {
                     mir_output_ty,
                     terr
                 );
-                None
+                (None, Default::default())
             });
 
         // Finally, if we instantiated the anon types successfully, we
         // have to solve any bounds (e.g., `-> impl Iterator` needs to
         // prove that `T: Iterator` where `T` is the type we
         // instantiated it with).
-        if let Some(anon_type_map) = anon_type_map {
-            self.fully_perform_op(start_position.at_self(), |_cx| {
+        if let (Some(anon_type_map), _) = anon_type_map {
+            self.fully_perform_op(start_position.at_self(), true, |_cx| {
                 infcx.constrain_anon_types(&anon_type_map, universal_regions);
                 Ok(InferOk {
                     value: (),

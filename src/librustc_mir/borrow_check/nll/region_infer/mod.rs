@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::universal_regions::UniversalRegions;
 use rustc::hir::def_id::DefId;
@@ -18,7 +18,7 @@ use rustc::infer::RegionObligation;
 use rustc::infer::RegionVariableOrigin;
 use rustc::infer::SubregionOrigin;
 use rustc::infer::error_reporting::nice_region_error::NiceRegionError;
-use rustc::infer::region_constraints::{GenericKind, VarOrigins};
+use rustc::infer::region_constraints::{GenericKind, VarOrigins, RegionConstraintData};
 use rustc::mir::{ClosureOutlivesRequirement, ClosureOutlivesSubject, ClosureRegionRequirements,
                  Local, Location, Mir};
 use rustc::traits::ObligationCause;
@@ -64,6 +64,8 @@ pub struct RegionInferenceContext<'tcx> {
 
     /// The constraints we have accumulated and used during solving.
     constraints: Vec<Constraint>,
+
+    conditional_constraints: Vec<FlattenedConditional>,
 
     /// Type constraints that we check after solving.
     type_tests: Vec<TypeTest<'tcx>>,
@@ -132,16 +134,79 @@ pub struct Constraint {
     // debugging logs, we sort them, and we'd like the "super region"
     // to be first, etc. (In particular, span should remain last.)
     /// The region SUP must outlive SUB...
-    sup: RegionVid,
+    pub sup: RegionVid,
 
     /// Region that must be outlived.
-    sub: RegionVid,
+    pub sub: RegionVid,
 
     /// At this location.
-    point: Location,
+    pub point: Location,
 
     /// Where did this constraint arise?
-    span: Span,
+    pub span: Span,
+}
+/*
+pub struct DelayedConstraint<'tcx> {
+
+    sup: Ty<'tcx>,
+
+    sub: Ty<'tcx>,
+
+    locations: Locations
+
+}*/
+
+#[derive(Debug)]
+struct FlattenedConditional {
+    pub orig: Vec<Constraint>,
+    pub to_check: Vec<Vec<Constraint>>
+}
+
+#[derive(Debug)]
+pub struct ConditionalConstraint<'tcx> {
+
+    // Add this constraint if none of the constraints
+    // in 'to_check' hold at the end of normal constraint evaluation
+    pub orig: OutlivesSet<'tcx>,
+
+    // After evaluating all non-conditional constraints,
+    // check (don't add) these constraint with eval_outlives.
+    // If none of them pass, add 'orig' add 'orig' constraint
+    pub to_check: Vec<OutlivesSet<'tcx>>,
+
+}
+/*
+struct ConstraintSet {
+
+    constraints: Vec<Constraint>
+
+}*/
+
+/// Outlives relationships between regions and types created at a
+/// particular point within the control-flow graph.
+#[derive(Debug)]
+pub struct OutlivesSet<'tcx> {
+    /// The locations associated with these constraints.
+    pub locations: Locations,
+
+    /// Constraints generated. In terms of the NLL RFC, when you have
+    /// a constraint `R1: R2 @ P`, the data in there specifies things
+    /// like `R1: R2`.
+    pub data: RegionConstraintData<'tcx>,
+}
+
+
+#[derive(Copy, Clone, Debug)]
+pub struct Locations {
+    /// The location in the MIR that generated these constraints.
+    /// This is intended for error reporting and diagnosis; the
+    /// constraints may *take effect* at a distinct spot.
+    pub from_location: Location,
+
+    /// The constraints must be met at this location. In terms of the
+    /// NLL RFC, when you have a constraint `R1: R2 @ P`, this field
+    /// is the `P` value.
+    pub at_location: Location,
 }
 
 /// A "type test" corresponds to an outlives constraint between a type
@@ -263,6 +328,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             ),
             inferred_values: None,
             constraints: Vec::new(),
+            conditional_constraints: Vec::new(),
             type_tests: Vec::new(),
             universal_regions,
         };
@@ -404,6 +470,20 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         });
     }
 
+
+    pub(super) fn add_conditional(
+        &mut self,
+        orig: Vec<Constraint>,
+        to_check: Vec<Vec<Constraint>>
+    ) {
+        debug!("add_conditional({:?}, {:?})", orig, to_check);
+        self.conditional_constraints.push(FlattenedConditional {
+            orig,
+            to_check
+        });
+    }
+    
+
     /// Add a "type test" that must be satisfied.
     pub(super) fn add_type_test(&mut self, type_test: TypeTest<'tcx>) {
         self.type_tests.push(type_test);
@@ -466,13 +546,53 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // constraints we have accumulated.
         let mut inferred_values = self.liveness_constraints.clone();
 
-        let dependency_map = self.build_dependency_map();
+        let mut dependency_map = HashMap::new();
+        self.build_dependency_map(&mut dependency_map, &self.constraints);
 
         // Constraints that may need to be repropagated (initially all):
         let mut dirty_list: Vec<_> = (0..self.constraints.len()).collect();
 
         // Set to 0 for each constraint that is on the dirty list:
         let mut clean_bit_vec = BitVector::new(dirty_list.len());
+
+
+        self.process_dirty_list(mir, &mut dirty_list,
+                                &mut clean_bit_vec,
+                                &dependency_map,
+                                &mut inferred_values);
+
+
+        self.inferred_values = Some(inferred_values);
+
+        let new_constraints = self.handle_conditionals(mir);
+
+        inferred_values = self.inferred_values.take().unwrap();
+
+        debug!("propagate_constraints: conditional_constraints={:?}", new_constraints);
+        dirty_list.extend(self.constraints.len()..(self.constraints.len() + new_constraints.len()));
+        clean_bit_vec.grow(new_constraints.len());
+
+        self.constraints.extend(new_constraints.clone());
+        dependency_map.clear();
+        self.build_dependency_map(&mut dependency_map, &self.constraints);
+
+
+        debug!("propagate_constraints: reprocessing with added conditionals");
+        self.process_dirty_list(mir, &mut dirty_list,
+                                &mut clean_bit_vec,
+                                &dependency_map,
+                                &mut inferred_values);
+
+        self.inferred_values = Some(inferred_values);
+
+        }
+
+    fn process_dirty_list(&self,
+                          mir: &Mir<'tcx>,
+                          dirty_list: &mut Vec<usize>,
+                          clean_bit_vec: &mut BitVector,
+                          dependency_map: &HashMap<RegionVid, Vec<usize>>,
+                          inferred_values: &mut RegionValues) {
 
         debug!("propagate_constraints: --------------------");
         while let Some(constraint_idx) = dirty_list.pop() {
@@ -488,7 +608,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 CopyFromSourceToTarget {
                     source_region: constraint.sub,
                     target_region: constraint.sup,
-                    inferred_values: &mut inferred_values,
+                    inferred_values,
                     constraint_point: constraint.point,
                     constraint_span: constraint.span,
                 },
@@ -507,22 +627,144 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
             debug!("\n");
         }
+    }
 
-        self.inferred_values = Some(inferred_values);
+    fn check_region_relationship(&self, constraints: &[Constraint], sup: RegionVid, target: RegionVid) -> bool {
+        let mut stack = Vec::new();
+        let mut visited = HashSet::new();
+        stack.push(sup);
+
+        while let Some(reg) = stack.pop() {
+            if !visited.insert(reg) {
+                continue;
+            }
+
+            for constraint in constraints {
+                if constraint.sup == reg {
+                    if constraint.sub == target {
+                        debug!("check_region_relationship(sup={:?}, target={:?}:
+                                 found!", sup, target);
+                        return true
+                    }
+                    stack.push(constraint.sub);
+                }
+            }
+        }
+        debug!("check_region_relationship(sup={:?}, target={:?}): not found", sup, target);
+        return false
+    }
+
+    fn handle_conditionals(&self, mir: &Mir<'tcx>) -> Vec<Constraint> {
+        let mut new_constraints = Vec::new();
+        // Map from sup to sub regions
+        //let mut relationships = HashMap::new();
+        //for constraints in 
+
+
+        // It might seem unsound to use all 'orig' constraints here,
+        // when we don't yet know if they're actually going to be added.
+        // However, 'fake_constraints' is used solely for
+        // the purpose of determining data flow (without actually running
+        // any of tyhe dataflow passes, which depend on region inference).
+        //
+        // Let's say we're evaluating the expression "_4 = &mut _3",
+        // where "_4" has the lifetime '_#4, and "_3" has the lifetime
+        // '_#3
+        // We want to determine if it's necessary that '_#3: '_#4 holds.
+        // Ordinarily, the answer is yes - without knowing anything about
+        // the types or lifetimes involved, we need to make sure
+        // that _3 stays alive as long as _4 does, so that we don't
+        // end up with a dangling pointer.
+        //
+        // However, there's a special case: _3 may be "derived from"
+        // _4. For example, _3 might have been created by calling some
+        // method on a reborrow of _4 - or might even be something like
+        // "_3 = &mut _4". In these special cases, it's not necessary
+        // that '_#3:'_#4' holds. All of these cases boil down
+        // to essentially the same thing - (re)borrowing a place _X,
+        // manipulating that place somehow (e.g. callinbg methods),
+        // and assigning the result of that manipulation back to _X.
+        // We know that this is sound: Anything that is derived from _X
+        // must be valid for as long as _X is, so there's no chance of
+        // creating a dangling pointer.
+        //
+        // To implement this, we do the following:
+        // Consider these (pseudo-MIR) statements
+        // _orig = ...
+        // "_1 = &mut (*_orig)"
+        // _orig = &mut (*_1)
+        //
+        // We want to determine if we should generae the constraint '_1: '_orig 
+        // for the statment "_orig = &mut (*_1)
+        // To do this, we look at all (re)borrows of the LHS (_orig)
+        // In this example, this is only "_1 = &mut (*_orig)"
+        // Now, we check if the lifetime of this borrow outlives
+        // our original rhs - "&mut (*_1)" at the point of assignment
+        // If it does, we don't need to create any additional constraints.
+        //
+        //
+        // The rule we always need to keep in mind is this:
+        // When assigning a reference to a place,
+        // we need to make sure that the LHS can't dangle -
+        //
+        //
+        // If we have a statement '_1 = &mut _2', then '_1' is derived
+        // from '_2' for our purposes. Later, it might turn out
+        // that it's not necessary for the constraint '_#2: '_#1 to hold:
+        // _2 might itself be derived from '_1'. We don't care about this,
+        // though: all we care is that any expressions involving
+        // '_1' 
+        let mut fake_constraints = self.constraints.clone();
+        for conditional in self.conditional_constraints.iter() {
+            fake_constraints.extend(conditional.orig.clone());
+        }
+
+        for conditional in self.conditional_constraints.iter() {
+            debug!("handle_conditionals: checking conditional {:?}", conditional);
+            let mut found_success = false;
+
+            for outlives in conditional.to_check.iter() {
+
+                let mut succeeded = true;
+                for constraint in outlives {
+                    debug!("handle_conditionals: evaluating constraint {:?}", constraint);
+
+                    // We first check if it even makes sense to test for an 'outlives'
+                    // relationship. If we can't trace a path from 'sup' to 'sub',
+                    // then the borrow corresponding to 'sub' isn't involved
+                    // with the original rhs in any way - it's an unrelated borrow
+                    // that occurs somewhere else in the mir.
+                    if !self.check_region_relationship(&fake_constraints, constraint.sup, constraint.sub) ||
+                       !self.eval_outlives(mir, constraint.sup, constraint.sub, constraint.point) {
+                            debug!("failed!");
+                            succeeded = false;
+                            break;
+                    }
+                }
+                if succeeded {
+                    debug!("handle_conditional: all sub-constraints succeeded for {:?}", conditional);
+                    found_success = true;
+                    break;
+                }
+            }
+
+            if !found_success {
+                debug!("handle_conditional: failed, adding orig for {:?}", conditional);
+                new_constraints.extend(conditional.orig.clone());
+            }
+        }
+
+        new_constraints
     }
 
     /// Builds up a map from each region variable X to a vector with the
     /// indices of constraints that need to be re-evaluated when X changes.
     /// These are constraints like Y: X @ P -- so if X changed, we may
     /// need to grow Y.
-    fn build_dependency_map(&self) -> HashMap<RegionVid, Vec<usize>> {
-        let mut map = HashMap::new();
-
-        for (idx, constraint) in self.constraints.iter().enumerate() {
+    fn build_dependency_map(&self, map: &mut HashMap<RegionVid, Vec<usize>>, constraints: &[Constraint]) {
+        for (idx, constraint) in constraints.iter().enumerate() {
             map.entry(constraint.sub).or_insert(Vec::new()).push(idx);
         }
-
-        map
     }
 
     /// Once regions have been propagated, this method is used to see
@@ -832,7 +1074,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
     }
 
     // Evaluate whether `sup_region: sub_region @ point`.
-    fn eval_outlives(
+    pub fn eval_outlives(
         &self,
         mir: &Mir<'tcx>,
         sup_region: RegionVid,

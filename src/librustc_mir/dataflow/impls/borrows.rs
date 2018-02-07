@@ -104,6 +104,119 @@ impl<'a, 'gcx, 'tcx> ActiveBorrows<'a, 'gcx, 'tcx> {
     }
 }
 
+pub struct GatherBorrows<'a, 'gcx: 'tcx + 'a, 'tcx: 'a> {
+    pub tcx: TyCtxt<'a, 'gcx, 'tcx>,
+    pub mir: &'a Mir<'tcx>,
+    pub idx_vec: IndexVec<BorrowIndex, BorrowData<'tcx>>,
+    pub location_map: FxHashMap<Location, BorrowIndex>,
+    pub assigned_map: FxHashMap<Place<'tcx>, FxHashSet<BorrowIndex>>,
+    pub region_map: FxHashMap<Region<'tcx>, FxHashSet<BorrowIndex>>,
+    pub local_map: FxHashMap<mir::Local, FxHashSet<BorrowIndex>>,
+    pub region_span_map: FxHashMap<RegionKind, Span>,
+}
+
+impl<'a, 'gcx, 'tcx> GatherBorrows<'a, 'gcx, 'tcx> {
+
+    pub fn new(tcx: TyCtxt<'a, 'gcx, 'tcx>,
+               mir: &'a Mir<'tcx>) -> GatherBorrows<'a, 'gcx, 'tcx> {
+
+        let mut visitor = GatherBorrows {
+            tcx,
+            mir,
+            idx_vec: IndexVec::new(),
+            location_map: FxHashMap(),
+            assigned_map: FxHashMap(),
+            region_map: FxHashMap(),
+            local_map: FxHashMap(),
+            region_span_map: FxHashMap()
+        };
+        visitor.visit_mir(mir);
+        visitor
+    }
+
+}
+
+impl<'a, 'gcx, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'gcx, 'tcx> {
+    fn visit_assign(&mut self,
+                    block: mir::BasicBlock,
+                    assigned_place: &mir::Place<'tcx>,
+                    rvalue: &mir::Rvalue<'tcx>,
+                    location: mir::Location) {
+        fn root_local(mut p: &mir::Place<'_>) -> Option<mir::Local> {
+            loop { match p {
+                mir::Place::Projection(pi) => p = &pi.base,
+                mir::Place::Static(_) => return None,
+                mir::Place::Local(l) => return Some(*l)
+            }}
+        }
+
+        if let mir::Rvalue::Ref(region, kind, ref borrowed_place) = *rvalue {
+            if is_unsafe_place(self.tcx, self.mir, borrowed_place) { return; }
+
+            let borrow = BorrowData {
+                location, kind, region,
+                borrowed_place: borrowed_place.clone(),
+                assigned_place: assigned_place.clone(),
+                orig_rvalue: rvalue.clone()
+            };
+            let idx = self.idx_vec.push(borrow);
+            self.location_map.insert(location, idx);
+
+            insert(&mut self.assigned_map, assigned_place, idx);
+            insert(&mut self.region_map, &region, idx);
+            if let Some(local) = root_local(borrowed_place) {
+                insert(&mut self.local_map, &local, idx);
+            }
+        }
+
+        return self.super_assign(block, assigned_place, rvalue, location);
+
+        fn insert<'a, K, V>(map: &'a mut FxHashMap<K, FxHashSet<V>>,
+                            k: &K,
+                            v: V)
+            where K: Clone+Eq+Hash, V: Eq+Hash
+        {
+            map.entry(k.clone())
+                .or_insert(FxHashSet())
+                .insert(v);
+        }
+    }
+
+    fn visit_rvalue(&mut self,
+                    rvalue: &mir::Rvalue<'tcx>,
+                    location: mir::Location) {
+        if let mir::Rvalue::Ref(region, kind, ref place) = *rvalue {
+            // double-check that we already registered a BorrowData for this
+
+            let mut found_it = false;
+            for idx in &self.region_map[region] {
+                let bd = &self.idx_vec[*idx];
+                if bd.location == location &&
+                    bd.kind == kind &&
+                    bd.region == region &&
+                    bd.borrowed_place == *place
+                {
+                    found_it = true;
+                    break;
+                }
+            }
+            assert!(found_it, "Ref {:?} at {:?} missing BorrowData", rvalue, location);
+        }
+
+        return self.super_rvalue(rvalue, location);
+    }
+
+    fn visit_statement(&mut self,
+                       block: mir::BasicBlock,
+                       statement: &mir::Statement<'tcx>,
+                       location: Location) {
+        if let mir::StatementKind::EndRegion(region_scope) = statement.kind {
+            self.region_span_map.insert(ReScope(region_scope), statement.source_info.span);
+        }
+        return self.super_statement(block, statement, location);
+    }
+}
+
 // temporarily allow some dead fields: `kind` and `region` will be
 // needed by borrowck; `borrowed_place` will probably be a MovePathIndex when
 // that is extended to include borrowed data paths.
@@ -115,6 +228,7 @@ pub struct BorrowData<'tcx> {
     pub(crate) region: Region<'tcx>,
     pub(crate) borrowed_place: mir::Place<'tcx>,
     pub(crate) assigned_place: mir::Place<'tcx>,
+    pub(crate) orig_rvalue: mir::Rvalue<'tcx>
 }
 
 impl<'tcx> fmt::Display for BorrowData<'tcx> {
@@ -150,23 +264,14 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                mir: &'a Mir<'tcx>,
                nonlexical_regioncx: Option<Rc<RegionInferenceContext<'tcx>>>,
                def_id: DefId,
-               body_id: Option<hir::BodyId>)
+               body_id: Option<hir::BodyId>,
+               visitor: GatherBorrows<'a, 'gcx, 'tcx>)
                -> Self {
         let scope_tree = tcx.region_scope_tree(def_id);
         let root_scope = body_id.map(|body_id| {
             region::Scope::CallSite(tcx.hir.body(body_id).value.hir_id.local_id)
         });
-        let mut visitor = GatherBorrows {
-            tcx,
-            mir,
-            idx_vec: IndexVec::new(),
-            location_map: FxHashMap(),
-            assigned_map: FxHashMap(),
-            region_map: FxHashMap(),
-            local_map: FxHashMap(),
-            region_span_map: FxHashMap()
-        };
-        visitor.visit_mir(mir);
+        
         return Borrows { tcx: tcx,
                          mir: mir,
                          borrows: visitor.idx_vec,
@@ -179,96 +284,7 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                          region_span_map: visitor.region_span_map,
                          nonlexical_regioncx };
 
-        struct GatherBorrows<'a, 'gcx: 'tcx, 'tcx: 'a> {
-            tcx: TyCtxt<'a, 'gcx, 'tcx>,
-            mir: &'a Mir<'tcx>,
-            idx_vec: IndexVec<BorrowIndex, BorrowData<'tcx>>,
-            location_map: FxHashMap<Location, BorrowIndex>,
-            assigned_map: FxHashMap<Place<'tcx>, FxHashSet<BorrowIndex>>,
-            region_map: FxHashMap<Region<'tcx>, FxHashSet<BorrowIndex>>,
-            local_map: FxHashMap<mir::Local, FxHashSet<BorrowIndex>>,
-            region_span_map: FxHashMap<RegionKind, Span>,
-        }
-
-        impl<'a, 'gcx, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'gcx, 'tcx> {
-            fn visit_assign(&mut self,
-                            block: mir::BasicBlock,
-                            assigned_place: &mir::Place<'tcx>,
-                            rvalue: &mir::Rvalue<'tcx>,
-                            location: mir::Location) {
-                fn root_local(mut p: &mir::Place<'_>) -> Option<mir::Local> {
-                    loop { match p {
-                        mir::Place::Projection(pi) => p = &pi.base,
-                        mir::Place::Static(_) => return None,
-                        mir::Place::Local(l) => return Some(*l)
-                    }}
-                }
-
-                if let mir::Rvalue::Ref(region, kind, ref borrowed_place) = *rvalue {
-                    if is_unsafe_place(self.tcx, self.mir, borrowed_place) { return; }
-
-                    let borrow = BorrowData {
-                        location, kind, region,
-                        borrowed_place: borrowed_place.clone(),
-                        assigned_place: assigned_place.clone(),
-                    };
-                    let idx = self.idx_vec.push(borrow);
-                    self.location_map.insert(location, idx);
-
-                    insert(&mut self.assigned_map, assigned_place, idx);
-                    insert(&mut self.region_map, &region, idx);
-                    if let Some(local) = root_local(borrowed_place) {
-                        insert(&mut self.local_map, &local, idx);
-                    }
-                }
-
-                return self.super_assign(block, assigned_place, rvalue, location);
-
-                fn insert<'a, K, V>(map: &'a mut FxHashMap<K, FxHashSet<V>>,
-                                    k: &K,
-                                    v: V)
-                    where K: Clone+Eq+Hash, V: Eq+Hash
-                {
-                    map.entry(k.clone())
-                        .or_insert(FxHashSet())
-                        .insert(v);
-                }
-            }
-
-            fn visit_rvalue(&mut self,
-                            rvalue: &mir::Rvalue<'tcx>,
-                            location: mir::Location) {
-                if let mir::Rvalue::Ref(region, kind, ref place) = *rvalue {
-                    // double-check that we already registered a BorrowData for this
-
-                    let mut found_it = false;
-                    for idx in &self.region_map[region] {
-                        let bd = &self.idx_vec[*idx];
-                        if bd.location == location &&
-                            bd.kind == kind &&
-                            bd.region == region &&
-                            bd.borrowed_place == *place
-                        {
-                            found_it = true;
-                            break;
-                        }
-                    }
-                    assert!(found_it, "Ref {:?} at {:?} missing BorrowData", rvalue, location);
-                }
-
-                return self.super_rvalue(rvalue, location);
-            }
-
-            fn visit_statement(&mut self,
-                               block: mir::BasicBlock,
-                               statement: &mir::Statement<'tcx>,
-                               location: Location) {
-                if let mir::StatementKind::EndRegion(region_scope) = statement.kind {
-                    self.region_span_map.insert(ReScope(region_scope), statement.source_info.span);
-                }
-                return self.super_statement(block, statement, location);
-            }
-        }
+        
     }
 
     pub fn borrows(&self) -> &IndexVec<BorrowIndex, BorrowData<'tcx>> { &self.borrows }
@@ -408,6 +424,8 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                         }
                     }
                 }
+
+                //self.kill_borrows_on_self_assign(sets, lhs, rhs, location, is_activations);
             }
 
             mir::StatementKind::StorageDead(local) => {
@@ -436,6 +454,86 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
             mir::StatementKind::Nop => {}
 
         }
+    }
+
+    fn kill_borrows_on_self_assign(&self,
+                                   sets: &mut BlockSets<ReserveOrActivateIndex>,
+                                   lhs: &rustc::mir::Place,
+                                   rhs: &rustc::mir::Rvalue,
+                                   location: Location,
+                                   is_activations: bool)
+    {
+        if let Some(ref regioncx) = self.nonlexical_regioncx {
+
+
+            let local = match lhs {
+                &mir::Place::Local(local) => local,
+                _ => return
+            };
+
+
+            match self.mir.local_decls[local].ty.sty {
+                ty::TyRef(_, _) => {},
+                _ => return
+            }
+
+            let reborrow = mir::Place::Local(local.clone()).deref();
+
+            debug!("kill_borrows_on_self_assign(local={:?}, rhs={:?}, is_activations={:?})",
+                    local,
+                    rhs,
+                    is_activations);
+            debug!("All borrows: {:?}", self.borrows);
+            debug!("Reborrow: {:?}", reborrow);
+
+            // Rhs has to be a reference, since the type of lhs is a reference
+            let rhs_reg = match rhs {
+                &mir::Rvalue::Ref(reg, _, _) => reg.to_region_vid(),
+                _ => return
+            };
+
+            for (borrow_index, borrow_data) in self.borrows.iter_enumerated() {
+
+
+                // For each reborrow of the place we're originally assigning to
+                if borrow_data.borrowed_place == reborrow {
+                    // If our rhs outlives the reborrow at this point,
+                    // Then we're ok to kill the reborrow. This won't
+                    // have been killed before, because
+                    // this assign we're working on will have forced
+                    // the reborrow to outlive the original place.
+                    //
+                    // Since we're assigning to the place we reborrowed,
+                    // we know that it's safe to store the rhs here - 
+                    // our place already has to outlive whatever thing it originally
+                    // contained, so storing something that outlives that original
+                    // thing is fine
+                    //
+
+                    debug!("kill_borrows_on_self_assign: testing outlives ({:?}, {:?}) {:?} {:?} {:?}", borrow_index, borrow_data, rhs_reg, borrow_data.region.to_region_vid(), location);
+
+                    if regioncx.eval_outlives(self.mir, rhs_reg, borrow_data.region.to_region_vid(), location) {
+                        debug!("kill_borrows_on_self_assign: rhs outlives borrow data!");
+                        sets.kill(&ReserveOrActivateIndex::reserved(borrow_index));
+                        if is_activations {
+                            sets.kill(&ReserveOrActivateIndex::active(borrow_index));
+                        }
+                    }
+
+                    /*for constraint in regioncx.constraints.iter() {^i
+                        if  constraint.sup == rhs_reg &&
+                            constraint.sub == borrow_data.region.to_region_vid() &&
+                            constraint.point == borrow_data.location
+                    }
+
+                    let borrow_region = borrow_data.region.to_region_vid();*/
+                }
+                
+            }
+        }
+
+
+
     }
 
     fn kill_borrows_on_local(&self,

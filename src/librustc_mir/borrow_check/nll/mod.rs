@@ -20,6 +20,7 @@ use transform::MirSource;
 use util::liveness::{LivenessResults, LocalSet};
 use dataflow::FlowAtLocation;
 use dataflow::MaybeInitializedPlaces;
+use dataflow::GatherBorrows;
 use dataflow::move_paths::MoveData;
 
 use util as mir_util;
@@ -73,6 +74,7 @@ pub(in borrow_check) fn compute_regions<'cx, 'gcx, 'tcx>(
     param_env: ty::ParamEnv<'gcx>,
     flow_inits: &mut FlowAtLocation<MaybeInitializedPlaces<'cx, 'gcx, 'tcx>>,
     move_data: &MoveData<'tcx>,
+    gather_borrows: &GatherBorrows<'cx, 'gcx, 'tcx>
 ) -> (
     RegionInferenceContext<'tcx>,
     Option<ClosureRegionRequirements<'gcx>>,
@@ -88,6 +90,7 @@ pub(in borrow_check) fn compute_regions<'cx, 'gcx, 'tcx>(
         &liveness,
         flow_inits,
         move_data,
+        gather_borrows
     );
 
     // Create the region inference context, taking ownership of the region inference
