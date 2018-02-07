@@ -424,8 +424,6 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
                         }
                     }
                 }
-
-                //self.kill_borrows_on_self_assign(sets, lhs, rhs, location, is_activations);
             }
 
             mir::StatementKind::StorageDead(local) => {
@@ -454,86 +452,6 @@ impl<'a, 'gcx, 'tcx> Borrows<'a, 'gcx, 'tcx> {
             mir::StatementKind::Nop => {}
 
         }
-    }
-
-    fn kill_borrows_on_self_assign(&self,
-                                   sets: &mut BlockSets<ReserveOrActivateIndex>,
-                                   lhs: &rustc::mir::Place,
-                                   rhs: &rustc::mir::Rvalue,
-                                   location: Location,
-                                   is_activations: bool)
-    {
-        if let Some(ref regioncx) = self.nonlexical_regioncx {
-
-
-            let local = match lhs {
-                &mir::Place::Local(local) => local,
-                _ => return
-            };
-
-
-            match self.mir.local_decls[local].ty.sty {
-                ty::TyRef(_, _) => {},
-                _ => return
-            }
-
-            let reborrow = mir::Place::Local(local.clone()).deref();
-
-            debug!("kill_borrows_on_self_assign(local={:?}, rhs={:?}, is_activations={:?})",
-                    local,
-                    rhs,
-                    is_activations);
-            debug!("All borrows: {:?}", self.borrows);
-            debug!("Reborrow: {:?}", reborrow);
-
-            // Rhs has to be a reference, since the type of lhs is a reference
-            let rhs_reg = match rhs {
-                &mir::Rvalue::Ref(reg, _, _) => reg.to_region_vid(),
-                _ => return
-            };
-
-            for (borrow_index, borrow_data) in self.borrows.iter_enumerated() {
-
-
-                // For each reborrow of the place we're originally assigning to
-                if borrow_data.borrowed_place == reborrow {
-                    // If our rhs outlives the reborrow at this point,
-                    // Then we're ok to kill the reborrow. This won't
-                    // have been killed before, because
-                    // this assign we're working on will have forced
-                    // the reborrow to outlive the original place.
-                    //
-                    // Since we're assigning to the place we reborrowed,
-                    // we know that it's safe to store the rhs here - 
-                    // our place already has to outlive whatever thing it originally
-                    // contained, so storing something that outlives that original
-                    // thing is fine
-                    //
-
-                    debug!("kill_borrows_on_self_assign: testing outlives ({:?}, {:?}) {:?} {:?} {:?}", borrow_index, borrow_data, rhs_reg, borrow_data.region.to_region_vid(), location);
-
-                    if regioncx.eval_outlives(self.mir, rhs_reg, borrow_data.region.to_region_vid(), location) {
-                        debug!("kill_borrows_on_self_assign: rhs outlives borrow data!");
-                        sets.kill(&ReserveOrActivateIndex::reserved(borrow_index));
-                        if is_activations {
-                            sets.kill(&ReserveOrActivateIndex::active(borrow_index));
-                        }
-                    }
-
-                    /*for constraint in regioncx.constraints.iter() {^i
-                        if  constraint.sup == rhs_reg &&
-                            constraint.sub == borrow_data.region.to_region_vid() &&
-                            constraint.point == borrow_data.location
-                    }
-
-                    let borrow_region = borrow_data.region.to_region_vid();*/
-                }
-                
-            }
-        }
-
-
-
     }
 
     fn kill_borrows_on_local(&self,
