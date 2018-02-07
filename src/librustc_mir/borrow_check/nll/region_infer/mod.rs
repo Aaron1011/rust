@@ -684,36 +684,8 @@ impl<'tcx> RegionInferenceContext<'tcx> {
         // to essentially the same thing - (re)borrowing a place _X,
         // manipulating that place somehow (e.g. callinbg methods),
         // and assigning the result of that manipulation back to _X.
-        // We know that this is sound: Anything that is derived from _X
-        // must be valid for as long as _X is, so there's no chance of
-        // creating a dangling pointer.
         //
-        // To implement this, we do the following:
-        // Consider these (pseudo-MIR) statements
-        // _orig = ...
-        // "_1 = &mut (*_orig)"
-        // _orig = &mut (*_1)
-        //
-        // We want to determine if we should generae the constraint '_1: '_orig 
-        // for the statment "_orig = &mut (*_1)
-        // To do this, we look at all (re)borrows of the LHS (_orig)
-        // In this example, this is only "_1 = &mut (*_orig)"
-        // Now, we check if the lifetime of this borrow outlives
-        // our original rhs - "&mut (*_1)" at the point of assignment
-        // If it does, we don't need to create any additional constraints.
-        //
-        //
-        // The rule we always need to keep in mind is this:
-        // When assigning a reference to a place,
-        // we need to make sure that the LHS can't dangle -
-        //
-        //
-        // If we have a statement '_1 = &mut _2', then '_1' is derived
-        // from '_2' for our purposes. Later, it might turn out
-        // that it's not necessary for the constraint '_#2: '_#1 to hold:
-        // _2 might itself be derived from '_1'. We don't care about this,
-        // though: all we care is that any expressions involving
-        // '_1' 
+
         let mut fake_constraints = self.constraints.clone();
         for conditional in self.conditional_constraints.iter() {
             fake_constraints.extend(conditional.orig.clone());
