@@ -334,7 +334,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 continue;
             }
 
-            let obligation = infcx.resolve_type_vars_if_possible(&Obligation::new(dummy_cause.clone(), new_env, pred));
+            let obligation = infcx.resolve_type_vars_if_possible(
+                &Obligation::new(dummy_cause.clone(), new_env, pred)
+            );
+            //let obligation = Obligation::new(dummy_cause.clone(), new_env, pred);
             let result = select.select(&obligation);
 
             match &result {
@@ -626,56 +629,69 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
             let is_new_pred =
                 fresh_preds.insert(self.clean_pred(select.infcx(), predicate.clone()));
 
+            // Resolve any inference variables that we can, to help selection succeed
             predicate = select.infcx().resolve_type_vars_if_possible(&predicate);
 
+            // We only add a predicate as a user-displayable bound if
+            // both its type and projection type consist of type parameters.
+            // This ensures that we avoid rendering bounds involving
+            // inference variables (which wouldn't make sense to users) or
+            // concrete types like SomeStruct: SomeTrait (which is incredibly pointless
+            // in generated documentation, since they're always true)
+            //
+            // We check this by calling is_of_param on the relevant types
+            // from the various possible predicates
             match &predicate {
                 &ty::Predicate::Trait(ref p) => {
-                    //let substs = &p.skip_binder().trait_ref.substs;
+                    if self.is_of_param(p.skip_binder().self_ty())
+                        && !only_projections
+                        && is_new_pred {
 
-                    if self.is_of_param(p.skip_binder().self_ty()) && !only_projections && is_new_pred {
                         self.add_user_pred(computed_preds, predicate);
                     }
                     predicates.push_back(p.clone());
                 }
                 &ty::Predicate::Projection(p) => {
-                    // We only add a predicate as a user-displayable bound if
-                    // both its type and projection type consist of type parameters.
-                    // This ensures that we avoid rendering bounds involving 
-                    // inference variables (which wouldn't make sense to users) or 
-                    // concrete types like SomeStruct: SomeTrait (which is incredibly pointless
-                    // in generated documentation, since they're always true)
+                    debug!("evaluate_nested_obligations: examining projection predicate {:?}",
+                           predicate);
+
                     if self.is_of_param(p.skip_binder().projection_ty.self_ty())
-                        && self.is_of_param(p.ty().skip_binder())
+                        && !p.ty().skip_binder().is_ty_infer()
                         && is_new_pred {
+                            debug!("evaluate_nested_obligations: adding projection predicate\
+                            to computed_preds: {:?}", predicate);
+
                         self.add_user_pred(computed_preds, predicate);
-                    } //else {
-                        match poly_project_and_unify_type(select, &obligation.with(p.clone())) {
-                            Err(e) => {
-                                debug!(
-                                    "evaluate_nested_obligations: Unable to unify predicate \
-                                     '{:?}' '{:?}', bailing out",
-                                    ty, e
-                                );
+                    } /*else*/
+                    if p.ty().skip_binder().is_ty_infer() {
+                        debug!("Projecting and unifying projection predicate {:?}",
+                               predicate);
+                    match poly_project_and_unify_type(select, &obligation.with(p.clone())) {
+                        Err(e) => {
+                            debug!(
+                                "evaluate_nested_obligations: Unable to unify predicate \
+                                 '{:?}' '{:?}'",
+                                ty, e
+                            );
+                        }
+                        Ok(Some(v)) => {
+                            if !self.evaluate_nested_obligations(
+                                ty,
+                                v.clone().iter().cloned(),
+                                computed_preds,
+                                fresh_preds,
+                                predicates,
+                                select,
+                                only_projections,
+                            ) {
                                 return false;
                             }
-                            Ok(Some(v)) => {
-                                if !self.evaluate_nested_obligations(
-                                    ty,
-                                    v.clone().iter().cloned(),
-                                    computed_preds,
-                                    fresh_preds,
-                                    predicates,
-                                    select,
-                                    only_projections,
-                                ) {
-                                    return false;
-                                }
-                            }
-                            Ok(None) => {
-                                panic!("Unexpected result when selecting {:?} {:?}", ty, obligation)
-                            }
                         }
-                    //}
+                        Ok(None) => {
+                            panic!("Unexpected result when selecting {:?} {:?}", ty, obligation)
+                        }
+                    }
+                }
                 }
                 &ty::Predicate::RegionOutlives(ref binder) => {
                     if select
