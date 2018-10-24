@@ -334,7 +334,8 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 continue;
             }
 
-            let result = select.select(&Obligation::new(dummy_cause.clone(), new_env, pred));
+            let obligation = infcx.resolve_type_vars_if_possible(&Obligation::new(dummy_cause.clone(), new_env, pred));
+            let result = select.select(&obligation);
 
             match &result {
                 &Ok(Some(ref vtable)) => {
@@ -354,7 +355,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                 }
                 &Ok(None) => {}
                 &Err(SelectionError::Unimplemented) => {
-                    if self.is_of_param(pred.skip_binder().trait_ref.substs) {
+                    if self.is_of_param(pred.skip_binder().self_ty()) {
                         already_visited.remove(&pred);
                         self.add_user_pred(
                             &mut user_computed_preds,
@@ -592,14 +593,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
         finished_map
     }
 
-    pub fn is_of_param(&self, substs: &Substs<'_>) -> bool {
-        if substs.is_noop() {
-            return false;
-        }
-
-        return match substs.type_at(0).sty {
+    pub fn is_of_param(&self, ty: Ty<'_>) -> bool {
+        return match ty.sty {
             ty::Param(_) => true,
-            ty::Projection(p) => self.is_of_param(p.substs),
+            ty::Projection(p) => self.is_of_param(p.self_ty()),
             _ => false,
         };
     }
@@ -622,28 +619,36 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
     ) -> bool {
         let dummy_cause = ObligationCause::misc(DUMMY_SP, ast::DUMMY_NODE_ID);
 
-        for (obligation, predicate) in nested
-            .filter(|o| o.recursion_depth == 1)
+        for (obligation, mut predicate) in nested
+            //.filter(|o| o.recursion_depth == 1)
             .map(|o| (o.clone(), o.predicate.clone()))
         {
             let is_new_pred =
                 fresh_preds.insert(self.clean_pred(select.infcx(), predicate.clone()));
 
+            predicate = select.infcx().resolve_type_vars_if_possible(&predicate);
+
             match &predicate {
                 &ty::Predicate::Trait(ref p) => {
-                    let substs = &p.skip_binder().trait_ref.substs;
+                    //let substs = &p.skip_binder().trait_ref.substs;
 
-                    if self.is_of_param(substs) && !only_projections && is_new_pred {
+                    if self.is_of_param(p.skip_binder().self_ty()) && !only_projections && is_new_pred {
                         self.add_user_pred(computed_preds, predicate);
                     }
                     predicates.push_back(p.clone());
                 }
                 &ty::Predicate::Projection(p) => {
-                    // If the projection isn't all type vars, then
-                    // we don't want to add it as a bound
-                    if self.is_of_param(p.skip_binder().projection_ty.substs) && is_new_pred {
+                    // We only add a predicate as a user-displayable bound if
+                    // both its type and projection type consist of type parameters.
+                    // This ensures that we avoid rendering bounds involving 
+                    // inference variables (which wouldn't make sense to users) or 
+                    // concrete types like SomeStruct: SomeTrait (which is incredibly pointless
+                    // in generated documentation, since they're always true)
+                    if self.is_of_param(p.skip_binder().projection_ty.self_ty())
+                        && self.is_of_param(p.ty().skip_binder())
+                        && is_new_pred {
                         self.add_user_pred(computed_preds, predicate);
-                    } else {
+                    } //else {
                         match poly_project_and_unify_type(select, &obligation.with(p.clone())) {
                             Err(e) => {
                                 debug!(
@@ -670,7 +675,7 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                                 panic!("Unexpected result when selecting {:?} {:?}", ty, obligation)
                             }
                         }
-                    }
+                    //}
                 }
                 &ty::Predicate::RegionOutlives(ref binder) => {
                     if select
