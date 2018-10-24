@@ -682,9 +682,10 @@ impl<'a, 'tcx> AutoTraitFinder<'a, 'tcx> {
                             Err(e) => {
                                 debug!(
                                     "evaluate_nested_obligations: Unable to unify predicate \
-                                     '{:?}' '{:?}'",
+                                     '{:?}' '{:?}', bailing out",
                                     ty, e
                                 );
+                                return false;
                             }
                             Ok(Some(v)) => {
                                 if !self.evaluate_nested_obligations(
