@@ -205,14 +205,17 @@ impl<'a> CrateLoader<'a> {
         if let Some(s) = self.sess.opts.extern_private.get(&name.as_str()) {
             for path in s {
                 let p = Some(path.as_str());
-                if p == lib.dylib.as_ref().and_then(|r| r.0.to_str()) || p == lib.rlib.as_ref().and_then(|r| r.0.to_str()) {
+                if p == lib.dylib.as_ref().and_then(|r| r.0.to_str()) ||
+                    p == lib.rlib.as_ref().and_then(|r| r.0.to_str()) {
+
                     private_dep = true;
                 }
             }
         }
 
 
-        info!("register crate `extern crate {} as {}` (private_dep = {})", crate_root.name, ident, private_dep);
+        info!("register crate `extern crate {} as {}` (private_dep = {})",
+            crate_root.name, ident, private_dep);
 
 
         // Claim this crate number and cache it

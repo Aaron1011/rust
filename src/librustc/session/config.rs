@@ -2305,14 +2305,14 @@ pub fn build_session_options_and_crate_config(
     }
 
     let mut extern_private: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
-    
+
     for arg in matches.opt_strs("extern-private").into_iter() {
         let mut parts = arg.splitn(2, '=');
         let name = parts.next().unwrap_or_else(||
             early_error(error_format, "--extern-private value must not be empty"));
         let location = parts.next().map(|s| s.to_string()).unwrap_or_else(||
             early_error(error_format, "--extern-private value must include a location"));
-                                                                        
+
 
         extern_private
             .entry(name.to_owned())

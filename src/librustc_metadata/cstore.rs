@@ -118,7 +118,8 @@ impl CStore {
     }
 
     pub(super) fn get_crate_data(&self, cnum: CrateNum) -> Lrc<CrateMetadata> {
-        self.metas.borrow()[cnum].clone().unwrap_or_else(|| panic!("Failed to get crate data for {:?}", cnum))
+        self.metas.borrow()[cnum].clone()
+            .unwrap_or_else(|| panic!("Failed to get crate data for {:?}", cnum))
     }
 
     pub(super) fn set_crate_data(&self, cnum: CrateNum, data: Lrc<CrateMetadata>) {
