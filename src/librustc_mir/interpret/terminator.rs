@@ -8,7 +8,8 @@ use rustc_target::spec::abi::Abi;
 
 use rustc::mir::interpret::{InterpResult, PointerArithmetic, InterpError, Scalar};
 use super::{
-    InterpretCx, Machine, Immediate, OpTy, ImmTy, PlaceTy, MPlaceTy, StackPopCleanup
+    InterpretCx, Machine, Immediate, OpTy, ImmTy, PlaceTy, MPlaceTy, StackPopCleanup, StepOutcome,
+    UnwindingState
 };
 
 impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
@@ -26,7 +27,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
     pub(super) fn eval_terminator(
         &mut self,
         terminator: &mir::Terminator<'tcx>,
-    ) -> InterpResult<'tcx> {
+    ) -> InterpResult<'tcx, StepOutcome> {
         use rustc::mir::TerminatorKind::*;
         match terminator.kind {
             Return => {
@@ -68,6 +69,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                 ref func,
                 ref args,
                 ref destination,
+                ref cleanup,
                 ..
             } => {
                 let (dest, ret) = match *destination {
@@ -100,13 +102,14 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                     &args[..],
                     dest,
                     ret,
+                    *cleanup
                 )?;
             }
 
             Drop {
                 ref location,
                 target,
-                ..
+                unwind,
             } => {
                 // FIXME(CTFE): forbid drop in const eval
                 let place = self.eval_place(location)?;
@@ -119,6 +122,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                     instance,
                     terminator.source_info.span,
                     target,
+                    unwind
                 )?;
             }
 
@@ -157,10 +161,21 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                 }
             }
 
+
+            // When we encounter Resume, we've finished unwinding
+            // cleanup for the current stack frame. We pop it in order
+            // to continue unwinding the next frame
+            Resume => {
+                trace!("unwinding: resuming from cleanup");
+                assert_eq!(self.unwinding, UnwindingState::Unwinding { in_cleanup: true });
+                self.unwinding = UnwindingState::Unwinding { in_cleanup: false };
+                self.pop_stack_frame()?;
+                return Ok(StepOutcome::Resume)
+            },
+
             Yield { .. } |
             GeneratorDrop |
             DropAndReplace { .. } |
-            Resume |
             Abort => unimplemented!("{:#?}", terminator.kind),
             FalseEdges { .. } => bug!("should have been eliminated by\
                                       `simplify_branches` mir pass"),
@@ -169,7 +184,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
             Unreachable => return err!(Unreachable),
         }
 
-        Ok(())
+        Ok(StepOutcome::MoreToDo)
     }
 
     fn check_argument_compat(
@@ -234,6 +249,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         args: &[OpTy<'tcx, M::PointerTag>],
         dest: Option<PlaceTy<'tcx, M::PointerTag>>,
         ret: Option<mir::BasicBlock>,
+        unwind: Option<mir::BasicBlock>
     ) -> InterpResult<'tcx> {
         trace!("eval_fn_call: {:#?}", instance);
 
@@ -281,7 +297,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                 }
 
                 // We need MIR for this fn
-                let body = match M::find_fn(self, instance, args, dest, ret)? {
+                let body = match M::find_fn(self, instance, args, dest, ret, unwind)? {
                     Some(body) => body,
                     None => return Ok(()),
                 };
@@ -291,7 +307,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                     span,
                     body,
                     dest,
-                    StackPopCleanup::Goto(ret),
+                    StackPopCleanup::Goto { ret, unwind }
                 )?;
 
                 // We want to pop this frame again in case there was an error, to put
@@ -447,7 +463,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                 });
                 trace!("Patched self operand to {:#?}", args[0]);
                 // recurse with concrete function
-                self.eval_fn_call(instance, span, caller_abi, &args, dest, ret)
+                self.eval_fn_call(instance, span, caller_abi, &args, dest, ret, unwind)
             }
         }
     }
@@ -458,6 +474,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         instance: ty::Instance<'tcx>,
         span: Span,
         target: mir::BasicBlock,
+        unwind: Option<mir::BasicBlock>
     ) -> InterpResult<'tcx> {
         trace!("drop_in_place: {:?},\n  {:?}, {:?}", *place, place.layout.ty, instance);
         // We take the address of the object.  This may well be unaligned, which is fine
@@ -488,6 +505,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
             &[arg.into()],
             Some(dest.into()),
             Some(target),
+            unwind
         )
     }
 }

@@ -14,6 +14,15 @@ use super::{
     InterpretCx, PlaceTy, OpTy, ImmTy, MemoryKind, Pointer, Memory
 };
 
+/// Data returned by Machine::stack_pop,
+/// to provide further control over the popping of the stack frame
+pub struct StackPopInfo {
+    /// Whether or not the machine is currently unwinding.
+    /// This affects the target block that will be jumped
+    /// to after the stack frame is popped.
+    pub unwinding: bool
+}
+
 /// Whether this kind of memory is allowed to leak
 pub trait MayLeak: Copy {
     fn may_leak(self) -> bool;
@@ -117,6 +126,7 @@ pub trait Machine<'mir, 'tcx>: Sized {
         args: &[OpTy<'tcx, Self::PointerTag>],
         dest: Option<PlaceTy<'tcx, Self::PointerTag>>,
         ret: Option<mir::BasicBlock>,
+        unwind: Option<mir::BasicBlock>
     ) -> InterpResult<'tcx, Option<&'mir mir::Body<'tcx>>>;
 
     /// Directly process an intrinsic without pushing a stack frame.
@@ -207,7 +217,7 @@ pub trait Machine<'mir, 'tcx>: Sized {
     fn stack_pop(
         ecx: &mut InterpretCx<'mir, 'tcx, Self>,
         extra: Self::FrameExtra,
-    ) -> InterpResult<'tcx>;
+    ) -> InterpResult<'tcx, StackPopInfo>;
 
     fn int_to_ptr(
         int: u64,

@@ -35,18 +35,40 @@ fn binop_right_homogeneous(op: mir::BinOp) -> bool {
     }
 }
 
+#[derive(Eq, PartialEq, Debug)]
+pub enum StepOutcome {
+    /// Indicates that there is still more work to do.
+    /// step() should be called again
+    MoreToDo,
+    /// Indicates that step() has completed all of
+    /// the available work - there is no point in making
+    /// further calls to step()
+    Done,
+    /// Indicates that a 'Resume' terminator
+    /// has been hit. This should only occur when
+    /// explicitly handling unwinding.
+    /// This requires special handling by the caller.
+    /// Callers not expecting it should return an error
+    /// to their caller, or panic otherwise.
+    Resume
+}
+
 impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
-    pub fn run(&mut self) -> InterpResult<'tcx> {
-        while self.step()? {}
-        Ok(())
+    pub fn run(&mut self) -> EvalResult<'tcx, StepOutcome> {
+        loop {
+            let res = self.step()?;
+            if res == StepOutcome::Done {
+                return Ok(res)
+            }
+        }
     }
 
     /// Returns `true` as long as there are more things to do.
     ///
     /// This is used by [priroda](https://github.com/oli-obk/priroda)
-    pub fn step(&mut self) -> InterpResult<'tcx, bool> {
+    pub fn step(&mut self) -> InterpResult<'tcx, StepOutcome> {
         if self.stack.is_empty() {
-            return Ok(false);
+            return Ok(StepOutcome::Done);
         }
 
         let block = self.frame().block;
@@ -59,15 +81,14 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         if let Some(stmt) = basic_block.statements.get(stmt_id) {
             assert_eq!(old_frames, self.cur_frame());
             self.statement(stmt)?;
-            return Ok(true);
+            return Ok(StepOutcome::MoreToDo);
         }
 
         M::before_terminator(self)?;
 
         let terminator = basic_block.terminator();
         assert_eq!(old_frames, self.cur_frame());
-        self.terminator(terminator)?;
-        Ok(true)
+        Ok(self.terminator(terminator)?)
     }
 
     fn statement(&mut self, stmt: &mir::Statement<'tcx>) -> InterpResult<'tcx> {
@@ -277,19 +298,21 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         Ok(())
     }
 
-    fn terminator(&mut self, terminator: &mir::Terminator<'tcx>) -> InterpResult<'tcx> {
+    fn terminator(&mut self, terminator: &mir::Terminator<'tcx>) -> InterpResult<'tcx, StepOutcome> {
         info!("{:?}", terminator.kind);
         self.tcx.span = terminator.source_info.span;
         self.memory.tcx.span = terminator.source_info.span;
 
         let old_stack = self.cur_frame();
         let old_bb = self.frame().block;
-        self.eval_terminator(terminator)?;
-        if !self.stack.is_empty() {
+        let res = self.eval_terminator(terminator)?;
+        // 'StepOutcome::Resume' requires special handling, so we don't
+        // expect our frame or block to change
+        if !self.stack.is_empty() && res != StepOutcome::Resume {
             // This should change *something*
             debug_assert!(self.cur_frame() != old_stack || self.frame().block != old_bb);
             info!("// {:?}", self.frame().block);
         }
-        Ok(())
+        Ok(res)
     }
 }

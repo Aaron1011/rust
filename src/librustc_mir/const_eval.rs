@@ -24,7 +24,7 @@ use crate::interpret::{self,
     RawConst, ConstValue,
     InterpResult, InterpErrorInfo, InterpError, GlobalId, InterpretCx, StackPopCleanup,
     Allocation, AllocId, MemoryKind, Memory,
-    snapshot, RefTracking, intern_const_alloc_recursive,
+    snapshot, RefTracking, intern_const_alloc_recursive, StackPopInfo
 };
 
 /// Number of steps until the detector even starts doing anything.
@@ -336,6 +336,7 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for CompileTimeInterpreter<'mir,
         args: &[OpTy<'tcx>],
         dest: Option<PlaceTy<'tcx>>,
         ret: Option<mir::BasicBlock>,
+        _unwind: Option<mir::BasicBlock> // unwinding is not supported in consts
     ) -> InterpResult<'tcx, Option<&'mir mir::Body<'tcx>>> {
         debug!("eval_fn_call: {:?}", instance);
         // Only check non-glue functions
@@ -463,8 +464,10 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for CompileTimeInterpreter<'mir,
 
     /// Called immediately before a stack frame gets popped.
     #[inline(always)]
-    fn stack_pop(_ecx: &mut InterpretCx<'mir, 'tcx, Self>, _extra: ()) -> InterpResult<'tcx> {
-        Ok(())
+    fn stack_pop(
+        _ecx: &mut InterpretCx<'a, 'mir, 'tcx, Self>, _extra: ()) -> InterpResult<'tcx, StackPopInfo> {
+        // Const-eval mode does not support unwinding from panics
+        Ok(StackPopInfo { unwinding: false } )
     }
 }
 
