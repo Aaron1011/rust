@@ -145,6 +145,12 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             impls.non_blanket_impls.values().flatten()
         ).cloned().collect()
     }
+
+    /// Returns a vector containing all blanket impls
+    pub fn all_blanket_impls(self, def_id: DefId) -> Vec<DefId> {
+        self.trait_impls_of(def_id)
+            .blanket_impls.clone()
+    }
 }
 
 // Query provider for `trait_impls_of`.

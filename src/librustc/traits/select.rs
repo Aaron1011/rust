@@ -87,6 +87,11 @@ pub struct SelectionContext<'cx, 'gcx: 'cx + 'tcx, 'tcx: 'cx> {
     /// policy. In essence, canonicalized queries need their errors propagated
     /// rather than immediately reported because we do not have accurate spans.
     query_mode: TraitQueryMode,
+
+    /// A special flag, used to force choosing an ImplCandidate over a ObjectCandidate
+    /// when discarding duplicate candidates. This is only 'true' when performing
+    /// a special coherence check in rustc::ty::wf - otherwise, it should be set to 'false/
+    force_impl_candidate_over_obj: bool
 }
 
 #[derive(Clone, Debug)]
@@ -499,7 +504,25 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             intercrate_ambiguity_causes: None,
             allow_negative_impls: false,
             query_mode: TraitQueryMode::Standard,
+            force_impl_candidate_over_obj: false
         }
+    }
+
+    pub fn force_impl_candidate_over_object(infcx: &'cx InferCtxt<'cx, 'gcx, 'tcx>)
+        -> SelectionContext<'cx, 'gcx, 'tcx> {
+
+        debug!("force_impl_candidate_over_object");
+
+        SelectionContext {
+            infcx,
+            freshener: infcx.freshener(),
+            intercrate: None,
+            intercrate_ambiguity_causes: None,
+            allow_negative_impls: false,
+            query_mode: TraitQueryMode::Standard,
+            force_impl_candidate_over_obj: true
+        }
+
     }
 
     pub fn intercrate(
@@ -514,6 +537,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             intercrate_ambiguity_causes: None,
             allow_negative_impls: false,
             query_mode: TraitQueryMode::Standard,
+            force_impl_candidate_over_obj: false
         }
     }
 
@@ -529,6 +553,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             intercrate_ambiguity_causes: None,
             allow_negative_impls,
             query_mode: TraitQueryMode::Standard,
+            force_impl_candidate_over_obj: false
         }
     }
 
@@ -544,6 +569,7 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
             intercrate_ambiguity_causes: None,
             allow_negative_impls: false,
             query_mode,
+            force_impl_candidate_over_obj: false
         }
     }
 
@@ -2361,6 +2387,28 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                 // This is a fix for #53123 and prevents winnowing from accidentally extending the
                 // lifetime of a variable.
                 BuiltinCandidate { has_nested: false } => false,
+
+                // When 'force_impl_candidate_over_obj:' we want to
+                // choose an ImplCandidate over an ObjectCandidate. To prevent
+                // duplication, we leave this in the
+                // 'ObjectCandidate | ProjectionCandidate = match victim.candidate'
+                // arm, and add an additional check for 'other.candidate'
+                ImplCandidate(..) if other.candidate == ObjectCandidate => {
+                    debug!(
+                        "candidate_should_be_dropped_in_favor_of: comparing other={:?}, victim={:?},\
+                        force_impl_candidate_over_obj={}",
+                        other, victim, self.force_impl_candidate_over_obj);
+
+                    // When self.force_impl_candidate_over_obj is 'true',
+                    // we don't want to discard the victim candidate, since
+                    // it's an ImplCandidate, and our 'other' candidate is an ObjectCandidate
+                    //
+                    // When self.force_impl_candidate_over_obj is 'false',
+                    // we want to discard the impl candidate, just as we discard
+                    // other candidates in favor of an ObjectCandidate.
+                    // This is the normal behavior of SelectionContext,
+                    !self.force_impl_candidate_over_obj
+                },
                 ImplCandidate(..)
                 | ClosureCandidate
                 | GeneratorCandidate
@@ -2396,7 +2444,19 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                     }
                 }
 
-                false
+                debug!("candidate_should_be_dropped_in_favor_of: \
+                       comparing impl other={:?}, victim={:?}, force_impl_candidate_over_obj={}",
+                       other, victim, self.force_impl_candidate_over_obj);
+
+                // Our current 'other' candidate is an ImplCandidate. If the special
+                // flag 'force_impl_candidate_over_obj', we want to discard our victim
+                // candidate if it's an ObjectCandidate. Normally, this flag will be 'false' -
+                // it's only set when performing a special coherence check in rustc::ty::wf
+                if self.force_impl_candidate_over_obj && victim.candidate == ObjectCandidate {
+                    true
+                } else {
+                    false
+                }
             }
             ClosureCandidate
             | GeneratorCandidate

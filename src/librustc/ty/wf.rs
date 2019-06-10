@@ -1,7 +1,7 @@
 use crate::hir;
 use crate::hir::def_id::DefId;
 use crate::infer::InferCtxt;
-use crate::ty::subst::SubstsRef;
+use crate::ty::subst::{Kind, SubstsRef};
 use crate::traits;
 use crate::ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable};
 use std::iter::once;
@@ -106,7 +106,35 @@ struct WfPredicates<'a, 'gcx: 'a+'tcx, 'tcx: 'a> {
     param_env: ty::ParamEnv<'tcx>,
     body_id: hir::HirId,
     span: Span,
-    out: Vec<traits::PredicateObligation<'tcx>>,
+    out: Vec<WfPredicate<'tcx>> 
+}
+
+/// Represents a predicate that must be proven for
+/// a type to be considered well-formed
+#[derive(Debug)]
+enum WfPredicate<'tcx> {
+    /// An ordinary PredicateObligation.
+    Normal(traits::PredicateObligation<'tcx>),
+    /// A predicate used to ensure that an impl is coherence
+    /// with respect to a trait object. When processing this predicate,
+    /// we instruct our SelectionContext to prefer impl candidates
+    /// over ObjectCandadates when dropping duplicate candidates.
+    /// This forces SelectionContext to actually check the code
+    /// that the user wrote, instead of masking coherence issues which
+    /// might pop up later.
+    ///
+    /// This is a very unusual scenario. In every other scenario,
+    /// you'll want to use WfPredicate::Normal
+    TraitObjectCoherence(traits::PredicateObligation<'tcx>)
+}
+
+impl<'tcx> WfPredicate<'tcx> {
+    fn has_escaping_bound_vars(&self) -> bool {
+        match self {
+            WfPredicate::Normal(p) => p.has_escaping_bound_vars(),
+            WfPredicate::TraitObjectCoherence(p) => p.has_escaping_bound_vars()
+        }
+    }
 }
 
 /// Controls whether we "elaborate" supertraits and so forth on the WF
@@ -150,8 +178,19 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
         self.out.iter()
                 .inspect(|pred| assert!(!pred.has_escaping_bound_vars()))
                 .flat_map(|pred| {
-                    let mut selcx = traits::SelectionContext::new(infcx);
-                    let pred = traits::normalize(&mut selcx, param_env, cause.clone(), pred);
+                    let (pred_inner, mut selcx) = match pred {
+                        WfPredicate::Normal(p) => (p, traits::SelectionContext::new(infcx)),
+                        WfPredicate::TraitObjectCoherence(p) => {
+                            // This is a trait object coherence related predicate.
+                            // We want to force SelectionContext to prefer
+                            // impl candidates over object candidates.
+                            let selcx = traits::SelectionContext
+                                ::force_impl_candidate_over_object(infcx);
+
+                            (p, selcx)
+                        }
+                    };
+                    let pred = traits::normalize(&mut selcx, param_env, cause.clone(), pred_inner);
                     once(pred.value).chain(pred.obligations)
                 })
                 .collect()
@@ -167,11 +206,17 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
 
         if let Elaborate::All = elaborate {
             let predicates = obligations.iter()
-                                        .map(|obligation| obligation.predicate.clone())
-                                        .collect();
+                        .map(|obligation| {
+                            match obligation {
+                                WfPredicate::Normal(o) | WfPredicate::TraitObjectCoherence(o) => {
+                                    o.predicate.clone()
+                                }
+                            }
+                        }).collect();
+
             let implied_obligations = traits::elaborate_predicates(self.infcx.tcx, predicates);
             let implied_obligations = implied_obligations.map(|pred| {
-                traits::Obligation::new(cause.clone(), param_env, pred)
+                WfPredicate::Normal(traits::Obligation::new(cause.clone(), param_env, pred))
             });
             self.out.extend(implied_obligations);
         }
@@ -181,9 +226,9 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
         self.out.extend(
             trait_ref.substs.types()
                             .filter(|ty| !ty.has_escaping_bound_vars())
-                            .map(|ty| traits::Obligation::new(cause.clone(),
+                            .map(|ty| WfPredicate::Normal(traits::Obligation::new(cause.clone(),
                                                               param_env,
-                                                              ty::Predicate::WellFormed(ty))));
+                                                              ty::Predicate::WellFormed(ty)))));
     }
 
     /// Pushes the obligations required for `trait_ref::Item` to be WF
@@ -198,7 +243,8 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
         if !data.has_escaping_bound_vars() {
             let predicate = trait_ref.to_predicate();
             let cause = self.cause(traits::ProjectionWf(data));
-            self.out.push(traits::Obligation::new(cause, self.param_env, predicate));
+            self.out.push(WfPredicate::Normal(
+                    traits::Obligation::new(cause, self.param_env, predicate)));
         }
     }
 
@@ -211,9 +257,9 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
 
             let predicate = ty::Predicate::ConstEvaluatable(def_id, substs);
             let cause = self.cause(traits::MiscObligation);
-            self.out.push(traits::Obligation::new(cause,
+            self.out.push(WfPredicate::Normal(traits::Obligation::new(cause,
                                                   self.param_env,
-                                                  predicate));
+                                                  predicate)));
         }
     }
 
@@ -224,7 +270,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
                 def_id: self.infcx.tcx.require_lang_item(lang_items::SizedTraitLangItem),
                 substs: self.infcx.tcx.mk_substs_trait(subty, &[]),
             };
-            self.out.push(traits::Obligation::new(cause, self.param_env, trait_ref.to_predicate()));
+            self.out.push(WfPredicate::Normal(traits::Obligation::new(cause, self.param_env, trait_ref.to_predicate())));
         }
     }
 
@@ -297,12 +343,12 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
                     if !r.has_escaping_bound_vars() && !rty.has_escaping_bound_vars() {
                         let cause = self.cause(traits::ReferenceOutlivesReferent(ty));
                         self.out.push(
-                            traits::Obligation::new(
+                            WfPredicate::Normal(traits::Obligation::new(
                                 cause,
                                 param_env,
                                 ty::Predicate::TypeOutlives(
                                     ty::Binder::dummy(
-                                        ty::OutlivesPredicate(rty, r)))));
+                                        ty::OutlivesPredicate(rty, r))))));
                     }
                 }
 
@@ -375,6 +421,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
                     // Here, we defer WF checking due to higher-ranked
                     // regions. This is perhaps not ideal.
                     self.from_object_ty(ty, data, r);
+                    self.blanket_impl_assoc_types(ty, data);
 
                     // FIXME(#27579) RFC also considers adding trait
                     // obligations that don't refer to Self and
@@ -384,11 +431,11 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
                     let component_traits =
                         data.auto_traits().chain(data.principal_def_id());
                     self.out.extend(
-                        component_traits.map(|did| traits::Obligation::new(
+                        component_traits.map(|did| WfPredicate::Normal(traits::Obligation::new(
                             cause.clone(),
                             param_env,
                             ty::Predicate::ObjectSafe(did)
-                        ))
+                        )))
                     );
                 }
 
@@ -414,9 +461,9 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
 
                         let cause = self.cause(traits::MiscObligation);
                         self.out.push( // ...not the type we started from, so we made progress.
-                            traits::Obligation::new(cause,
+                            WfPredicate::Normal(traits::Obligation::new(cause,
                                                     self.param_env,
-                                                    ty::Predicate::WellFormed(ty)));
+                                                    ty::Predicate::WellFormed(ty))));
                     } else {
                         // Yes, resolved, proceed with the
                         // result. Should never return false because
@@ -434,7 +481,7 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
     fn nominal_obligations(&mut self,
                            def_id: DefId,
                            substs: SubstsRef<'tcx>)
-                           -> Vec<traits::PredicateObligation<'tcx>>
+                           -> Vec<WfPredicate<'tcx>>
     {
         let predicates =
             self.infcx.tcx.predicates_of(def_id)
@@ -442,9 +489,9 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
         let cause = self.cause(traits::ItemObligation(def_id));
         predicates.predicates
                   .into_iter()
-                  .map(|pred| traits::Obligation::new(cause.clone(),
+                  .map(|pred| WfPredicate::Normal(traits::Obligation::new(cause.clone(),
                                                       self.param_env,
-                                                      pred))
+                                                      pred)))
                   .filter(|pred| !pred.has_escaping_bound_vars())
                   .collect()
     }
@@ -494,10 +541,76 @@ impl<'a, 'gcx, 'tcx> WfPredicates<'a, 'gcx, 'tcx> {
                 let cause = self.cause(traits::ObjectTypeBound(ty, explicit_bound));
                 let outlives = ty::Binder::dummy(
                     ty::OutlivesPredicate(explicit_bound, implicit_bound));
-                self.out.push(traits::Obligation::new(cause,
+                self.out.push(WfPredicate::Normal(traits::Obligation::new(cause,
                                                       self.param_env,
-                                                      outlives.to_predicate()));
+                                                      outlives.to_predicate())));
             }
+        }
+    }
+
+    fn blanket_impl_assoc_types(&mut self,
+                                ty: Ty<'tcx>,
+                                data: ty::Binder<&'tcx ty::List<ty::ExistentialPredicate<'tcx>>>
+    ) {
+
+        debug!("wf::blanket_impl_assoc_types(data = {:?}", data);
+
+        let principal = match data.principal() {
+            Some(p) => p,
+            None => return
+        };
+
+        //let trait_did = principal.def_id();
+
+
+        // 
+        /*let impl_did = match self.infx.tcx.all_blanket_impls(trait_did).next()
+            Some(did) => did,
+            None => return
+        };*/
+
+
+        let ty_kind: Kind<'tcx> = ty.into();
+
+        let new_substs = self.infcx.tcx.mk_substs(
+            std::iter::once(&ty_kind).chain(principal.skip_binder().substs.clone()));
+
+
+        for obj_proj in data.projection_bounds() {
+            let cause = self.cause(traits::MiscObligation);
+            let projection_ty = ty::ProjectionTy {
+                item_def_id: obj_proj.item_def_id(),
+                substs: new_substs
+            };
+
+            let proj_pred = obj_proj.map_bound(|p| {
+                ty::ProjectionPredicate {
+                    projection_ty,
+                    ty: p.ty
+                }
+            });
+            /*let proj_pred = ty::Binder::dummy(ty::ProjectionPredicate {
+                projection_ty,
+                ty: obj_proj.skip_binder().ty
+            });*/
+            let obligation = traits::Obligation::new(cause,
+                                                  self.param_env,
+                                                  ty::Predicate::Projection(proj_pred));
+
+            debug!("wf::blanket_impl_assoc_types: pushing obligation {:?}", obligation);
+
+            // In order for us to be able to detect a blank impl that's
+            // incoherence with the builtin object impl, we need SelectionContext
+            // to actually choose the blanket impl candidate. Unfortunately,
+            // SelectionContext will be default choose object candidates over impl candidates.
+            // Nornally, this is the correct behavior, as this is how things actually
+            // work at runtime (all trait impls end up going through the vtable).
+            // However, when we want to detect an incoherence blanket impl, we 
+            // need to see if there's a blanket impl that would otherwise be chosen.
+            // To do this, we use the WfPredicate::TraitObjectCoherence enum variant,
+            // which indicates that we want to use a non-standard behavior of SelectionContext
+            // when normalizing this predicate.
+            self.out.push(WfPredicate::TraitObjectCoherence(obligation));
         }
     }
 }
