@@ -225,7 +225,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     }
                 }
 
-                let temp = {
+                let (temp, temp_local) = {
                     let mut local_decl = LocalDecl::new_temp(expr.ty.clone(), temp_span);
                     if temp_in_tail_of_block {
                         if this.block_context.currently_ignores_tail_results() {
@@ -233,13 +233,20 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                                 tail_result_is_ignored: true
                             });
                         }
-                    }
+                }
                     let temp = this.local_decls.push(local_decl);
                     let place = Place::Base(PlaceBase::Local(temp));
                     debug!("created temp {:?} for expr {:?} in block_context: {:?}",
                            temp, expr, this.block_context);
-                    place
+                    (place, temp)
                 };
+
+                // Push StorageLive statement for our temporary local
+                this.cfg.push(block, Statement {
+                    source_info,
+                    kind: StatementKind::StorageLive(temp_local)
+                });
+
                 unpack!(block = this.into(&temp, block, expr));
 
                 // Attribute drops of the statement's temps to the
@@ -250,6 +257,15 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 });
 
                 unpack!(block = this.build_drop(block, drop_point, temp, expr_ty));
+
+                // Since this is a temporary local, we know that
+                // it will never be used again. Emit a StorageDead
+                // now that we've dropped it.
+                this.cfg.push(block, Statement {
+                    source_info,
+                    kind: StatementKind::StorageDead(temp_local)
+                });
+
                 block.unit()
             }
         }
