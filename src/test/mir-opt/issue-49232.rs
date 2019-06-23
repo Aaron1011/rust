@@ -73,11 +73,13 @@ fn main() {
 //     bb12: {
 //         FakeRead(ForLet, _2);
 //         StorageDead(_3);
+//         StorageLive(_5);
 //         StorageLive(_6);
 //         _6 = &_2;
 //         _5 = const std::mem::drop::<&i32>(move _6) -> [return: bb13, unwind: bb4];
 //     }
 //     bb13: {
+//         StorageDead(_5);
 //         StorageDead(_6);
 //         _1 = ();
 //         StorageDead(_2);

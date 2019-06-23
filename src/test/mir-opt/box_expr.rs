@@ -50,12 +50,14 @@ impl Drop for S {
 //
 //     bb4: {
 //         StorageDead(_2);
+//         StorageLive(_3);
 //         StorageLive(_4);
 //         _4 = move _1;
 //         _3 = const std::mem::drop::<std::boxed::Box<S>>(move _4) -> [return: bb5, unwind: bb7];
 //     }
 //
 //     bb5: {
+//         StorageDead(_3);
 //         drop(_4) -> [return: bb8, unwind: bb6];
 //     }
 //

@@ -36,6 +36,7 @@ fn main() {
 //     goto -> bb3;
 // }
 // bb7: {
+//     StorageLive(_2);
 //     StorageLive(_3);
 //     goto -> bb1;
 // }

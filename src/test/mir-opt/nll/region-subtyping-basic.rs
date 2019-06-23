@@ -1,3 +1,5 @@
+// ignore-tidy-linelength
+//
 // Basic test for liveness constraints: the region (`R1`) that appears
 // in the type of `p` includes the points after `&v[0]` up to (but not
 // including) the call to `use_x`. The `else` branch is not included.
@@ -22,9 +24,11 @@ fn main() {
 
 // END RUST SOURCE
 // START rustc.main.nll.0.mir
-// | '_#2r | U0 | {bb2[0..=8], bb3[0], bb5[0..=1]}
-// | '_#3r | U0 | {bb2[1..=8], bb3[0], bb5[0..=1]}
-// | '_#4r | U0 | {bb2[4..=8], bb3[0], bb5[0..=1]}
+// | '_#0r | U0 | {bb0[0..=8], bb1[0], bb2[0..=8], bb3[0], bb4[0..=1], bb5[0..=3], bb6[0..=3], bb7[0..=2], bb8[0..=4], '_#0r, '_#1r}
+// | '_#1r | U0 | {bb0[0..=8], bb1[0], bb2[0..=8], bb3[0], bb4[0..=1], bb5[0..=3], bb6[0..=3], bb7[0..=2], bb8[0..=4], '_#1r}
+// | '_#2r | U0 | {bb2[0..=8], bb3[0], bb5[0..=2]}
+// | '_#3r | U0 | {bb2[1..=8], bb3[0], bb5[0..=2]}
+// | '_#4r | U0 | {bb2[4..=8], bb3[0], bb5[0..=2]}
 // END rustc.main.nll.0.mir
 // START rustc.main.nll.0.mir
 // let _2: &'_#3r usize;

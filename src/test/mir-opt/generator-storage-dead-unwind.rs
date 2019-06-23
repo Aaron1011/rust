@@ -46,6 +46,8 @@ fn main() {
 //     _2 = Foo(const 5i32,);
 //     StorageLive(_3);
 //     _3 = Bar(const 6i32,);
+//     StorageLive(_4);
+//     StorageLive(_5);
 //     ...
 //     _1 = suspend(move _5) -> [resume: bb2, drop: bb4];
 // }
@@ -53,17 +55,20 @@ fn main() {
 //     resume;
 // }
 // bb2: {
-//     ...
+//     _4 = ();
+//     StorageDead(_4);
+//     StorageDead(_5);
+//     StorageLive(_6);
 //     StorageLive(_7);
 //     _7 = move _2;
-//     _6 = const take::<Foo>(move _7) -> [return: bb9, unwind: bb8];
+//     _6 = const take::<Foo>(move _7) -> [return: bb7, unwind: bb9];
 // }
 // bb3 (cleanup): {
 //     StorageDead(_2);
 //     drop(_1) -> bb1;
 // }
 // bb4: {
-//     ...
+//     StorageDead(_5);
 //     StorageDead(_3);
 //     drop(_2) -> [return: bb5, unwind: bb3];
 // }
@@ -74,22 +79,25 @@ fn main() {
 // bb6: {
 //     generator_drop;
 // }
-// bb7 (cleanup): {
-//     StorageDead(_3);
-//     StorageDead(_2);
-//     drop(_1) -> bb1;
-// }
-// bb8 (cleanup): {
+// bb7: {
+//     StorageDead(_6);
 //     StorageDead(_7);
-//     goto -> bb7;
-// }
-// bb9: {
-//     StorageDead(_7);
+//     StorageLive(_8);
 //     StorageLive(_9);
 //     _9 = move _3;
 //     _8 = const take::<Bar>(move _9) -> [return: bb10, unwind: bb11];
 // }
+// bb8 (cleanup): {
+//     StorageDead(_3);
+//     StorageDead(_2);
+//     drop(_1) -> bb1;
+// }
+// bb9 (cleanup): {
+//     StorageDead(_7);
+//     goto -> bb8;
+// }
 // bb10: {
+//     StorageDead(_8);
 //     StorageDead(_9);
 //     ...
 //     StorageDead(_3);
@@ -98,7 +106,7 @@ fn main() {
 // }
 // bb11 (cleanup): {
 //     StorageDead(_9);
-//     goto -> bb7;
+//     goto -> bb8;
 // }
 // bb12: {
 //     return;
