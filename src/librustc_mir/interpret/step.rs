@@ -54,7 +54,7 @@ pub enum StepOutcome {
 }
 
 impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
-    pub fn run(&mut self) -> EvalResult<'tcx, StepOutcome> {
+    pub fn run(&mut self) -> InterpResult<'tcx, StepOutcome> {
         loop {
             let res = self.step()?;
             if res == StepOutcome::Done {

@@ -423,7 +423,6 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
             // cannot use the shim here, because that will only result in infinite recursion
             ty::InstanceDef::Virtual(_, idx) => {
                 let mut args = args.to_vec();
-                let ptr_size = self.pointer_size();
                 // We have to implement all "object safe receivers".  Currently we
                 // support built-in pointers (&, &mut, Box) as well as unsized-self.  We do
                 // not yet support custom self types.
@@ -440,15 +439,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                 };
                 // Find and consult vtable
                 let vtable = receiver_place.vtable();
-                let vtable_slot = vtable.ptr_offset(ptr_size * (idx as u64 + 3), self)?;
-                let vtable_slot = self.memory.check_ptr_access(
-                    vtable_slot,
-                    ptr_size,
-                    self.tcx.data_layout.pointer_align.abi,
-                )?.expect("cannot be a ZST");
-                let fn_ptr = self.memory.get(vtable_slot.alloc_id)?
-                    .read_ptr_sized(self, vtable_slot)?.to_ptr()?;
-                let instance = self.memory.get_fn(fn_ptr)?;
+                let instance = self.get_vtable_slot(vtable, idx)?;
 
                 // `*mut receiver_place.layout.ty` is almost the layout that we
                 // want for args[0]: We have to project to field 0 because we want

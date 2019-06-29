@@ -465,7 +465,7 @@ impl<'mir, 'tcx> interpret::Machine<'mir, 'tcx> for CompileTimeInterpreter<'mir,
     /// Called immediately before a stack frame gets popped.
     #[inline(always)]
     fn stack_pop(
-        _ecx: &mut InterpretCx<'a, 'mir, 'tcx, Self>, _extra: ()) -> InterpResult<'tcx, StackPopInfo> {
+        _ecx: &mut InterpretCx<'mir, 'tcx, Self>, _extra: ()) -> InterpResult<'tcx, StackPopInfo> {
         // Const-eval mode does not support unwinding from panics
         Ok(StackPopInfo { unwinding: false } )
     }

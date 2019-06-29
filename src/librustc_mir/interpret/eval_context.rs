@@ -10,7 +10,7 @@ use rustc::ty::layout::{
     self, Size, Align, HasDataLayout, LayoutOf, TyLayout
 };
 use rustc::ty::subst::{Subst, SubstsRef};
-use rustc::ty::{self, Ty, TyCtxt, TypeFoldable};
+use rustc::ty::{self, Ty, TyCtxt, TypeFoldable, Instance};
 use rustc::ty::query::TyCtxtAt;
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc::mir::interpret::{
@@ -23,7 +23,7 @@ use rustc_data_structures::fx::FxHashMap;
 
 use super::{
     Immediate, Operand, MemPlace, MPlaceTy, Place, PlaceTy, ScalarMaybeUndef,
-    Memory, Machine
+    Memory, Machine, PointerArithmetic
 };
 
 pub struct InterpretCx<'mir, 'tcx, M: Machine<'mir, 'tcx>> {
@@ -639,7 +639,6 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                         self.place_to_op(return_place)?,
                         vec![],
                         None,
-                        /*const_mode*/false,
                     )?;
                 }
             } else {
@@ -895,5 +894,25 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         size: Size
     ) -> InterpResult<'tcx, u128> {
         self.memory.force_bits(scalar, size)
+    }
+
+    /// Resolve the function at the specified slot in the provided
+    /// vtable. An index of '0' corresponds to the first method
+    /// declared in the trait of the provided vtable
+    pub fn get_vtable_slot(
+        &self,
+        vtable: Scalar<M::PointerTag>,
+        idx: usize
+    ) -> InterpResult<'tcx, Instance<'tcx>> {
+        let ptr_size = self.pointer_size();
+        let vtable_slot = vtable.ptr_offset(ptr_size * (idx as u64 + 3), self)?;
+        let vtable_slot = self.memory.check_ptr_access(
+            vtable_slot,
+            ptr_size,
+            self.tcx.data_layout.pointer_align.abi,
+        )?.expect("cannot be a ZST");
+        let fn_ptr = self.memory.get(vtable_slot.alloc_id)?
+            .read_ptr_sized(self, vtable_slot)?.to_ptr()?;
+        Ok(self.memory.get_fn(fn_ptr)?)
     }
 }
