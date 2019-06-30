@@ -170,7 +170,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
                 assert_eq!(self.unwinding, UnwindingState::Unwinding { in_cleanup: true });
                 self.unwinding = UnwindingState::Unwinding { in_cleanup: false };
                 self.pop_stack_frame()?;
-                return Ok(StepOutcome::Resume)
+                return Ok(StepOutcome::MoreToDo { resume: true })
             },
 
             Yield { .. } |
@@ -184,7 +184,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
             Unreachable => return err!(Unreachable),
         }
 
-        Ok(StepOutcome::MoreToDo)
+        Ok(StepOutcome::MoreToDo { resume: false })
     }
 
     fn check_argument_compat(

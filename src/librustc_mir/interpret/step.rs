@@ -39,18 +39,13 @@ fn binop_right_homogeneous(op: mir::BinOp) -> bool {
 pub enum StepOutcome {
     /// Indicates that there is still more work to do.
     /// step() should be called again
-    MoreToDo,
+    /// 'resume' is true when when we've hit
+    /// an explicit 'Resume' terminator
+    MoreToDo { resume: bool },
     /// Indicates that step() has completed all of
     /// the available work - there is no point in making
     /// further calls to step()
     Done,
-    /// Indicates that a 'Resume' terminator
-    /// has been hit. This should only occur when
-    /// explicitly handling unwinding.
-    /// This requires special handling by the caller.
-    /// Callers not expecting it should return an error
-    /// to their caller, or panic otherwise.
-    Resume
 }
 
 impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
@@ -81,7 +76,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         if let Some(stmt) = basic_block.statements.get(stmt_id) {
             assert_eq!(old_frames, self.cur_frame());
             self.statement(stmt)?;
-            return Ok(StepOutcome::MoreToDo);
+            return Ok(StepOutcome::MoreToDo { resume: false });
         }
 
         M::before_terminator(self)?;
@@ -308,7 +303,7 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpretCx<'mir, 'tcx, M> {
         let res = self.eval_terminator(terminator)?;
         // 'StepOutcome::Resume' requires special handling, so we don't
         // expect our frame or block to change
-        if !self.stack.is_empty() && res != StepOutcome::Resume {
+        if !self.stack.is_empty() && res != (StepOutcome::MoreToDo { resume: true }) {
             // This should change *something*
             debug_assert!(self.cur_frame() != old_stack || self.frame().block != old_bb);
             info!("// {:?}", self.frame().block);
