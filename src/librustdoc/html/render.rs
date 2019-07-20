@@ -2828,7 +2828,7 @@ fn item_module(w: &mut fmt::Formatter<'_>, cx: &Context,
             clean::ImportItem(ref import) => {
                 write!(w, "<tr><td><code>{}{}</code></td></tr>",
                        VisSpace(&myitem.visibility), *import)?;
-            }
+            },
 
             _ => {
                 if myitem.name.is_none() { continue }
