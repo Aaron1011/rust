@@ -654,7 +654,7 @@ impl<'a> LoweringContext<'a> {
         let proc_macros = c.proc_macros.iter().map(|p| {
             ProcMacroInfo {
                 span: p.span,
-                attrs: self.lower_attrs(&c.attrs).to_vec()
+                attrs: self.lower_attrs(&p.attrs).to_vec()
             }
         }).collect();
         let attrs = self.lower_attrs(&c.attrs);

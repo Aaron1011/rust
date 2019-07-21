@@ -108,7 +108,6 @@ pub fn try_inline(
             record_extern_fqn(cx, did, clean::TypeKind::Const);
             clean::ConstantItem(build_const(cx, did))
         }
-        // FIXME: proc-macros don't propagate attributes or spans across crates, so they look empty
         Res::Def(DefKind::Macro(kind), did) => {
             let mac = build_macro(cx, did, name);
 
@@ -123,7 +122,8 @@ pub fn try_inline(
         _ => return None,
     };
 
-    let attrs = merge_attrs(cx, load_attrs(cx, did), attrs_clone);
+    let target_attrs = load_attrs(cx, did);
+    let attrs = merge_attrs(cx, target_attrs,  attrs_clone);
 
     cx.renderinfo.borrow_mut().inlined.insert(did);
     ret.push(clean::Item {
@@ -299,12 +299,16 @@ pub fn build_impls(cx: &DocContext<'_>, did: DefId, attrs: Option<Attrs<'_>>) ->
 
 fn merge_attrs(cx: &DocContext<'_>, attrs: Attrs<'_>, other_attrs: Option<Attrs<'_>>
 ) -> clean::Attributes {
-    let mut merged_attrs: Vec<ast::Attribute> = Vec::from(&*attrs);
+    let mut merged_attrs: Vec<ast::Attribute> = Vec::with_capacity(attrs.len());
+    // If we have additional attributes (from a re-export),
+    // always insert them first. This ensure that re-export
+    // doc comments show up before the original doc comments
+    // when we render them.
     if let Some(a) = other_attrs {
         merged_attrs.extend(a.iter().cloned());
     }
-    let cleaned: clean::Attributes = merged_attrs.clean(cx);
-    cleaned
+    merged_attrs.extend(attrs.to_vec());
+    merged_attrs.clean(cx)
 }
 
 pub fn build_impl(cx: &DocContext<'_>, did: DefId, attrs: Option<Attrs<'_>>,
