@@ -1,5 +1,6 @@
 // force-host
 // no-prefer-dynamic
+// rustdoc-flags: --proc-macro-crate
 
 #![crate_type="proc-macro"]
 #![crate_name="some_macros"]

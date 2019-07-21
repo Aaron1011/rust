@@ -296,6 +296,8 @@ pub struct TestProps {
     pub error_patterns: Vec<String>,
     // Extra flags to pass to the compiler
     pub compile_flags: Vec<String>,
+    // Extra flags to pass to rustdoc
+    pub rustdoc_flags: Vec<String>,
     // Extra flags to pass when the compiled code is run (such as --bench)
     pub run_flags: Option<String>,
     // If present, the name of a file that this test should match when
@@ -374,6 +376,7 @@ impl TestProps {
         TestProps {
             error_patterns: vec![],
             compile_flags: vec![],
+            rustdoc_flags: vec![],
             run_flags: None,
             pp_exact: None,
             aux_builds: vec![],
@@ -436,6 +439,11 @@ impl TestProps {
             if let Some(flags) = config.parse_compile_flags(ln) {
                 self.compile_flags
                     .extend(flags.split_whitespace().map(|s| s.to_owned()));
+            }
+
+            if let Some(flags) = config.parse_rustdoc_flags(ln) {
+                self.rustdoc_flags
+                    .extend(flags.split_whitespace().map(|s| s.to_owned()))
             }
 
             if let Some(edition) = config.parse_edition(ln) {
@@ -683,6 +691,10 @@ impl Config {
 
     fn parse_compile_flags(&self, line: &str) -> Option<String> {
         self.parse_name_value_directive(line, "compile-flags")
+    }
+
+    fn parse_rustdoc_flags(&self, line: &str) -> Option<String> {
+        self.parse_name_value_directive(line, "rustdoc-flags")
     }
 
     fn parse_revisions(&self, line: &str) -> Option<Vec<String>> {

@@ -454,7 +454,7 @@ fn mk_decls(
         i
     });
 
-    (   
+    (
         cx.monotonic_expander().flat_map_item(module).pop().unwrap(),
         proc_macro_infos.into_inner()
     )

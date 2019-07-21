@@ -1597,7 +1597,8 @@ impl<'test> TestCx<'test> {
             .arg("-o")
             .arg(out_dir)
             .arg(&self.testpaths.file)
-            .args(&self.props.compile_flags);
+            .args(&self.props.compile_flags)
+            .args(&self.props.rustdoc_flags);
 
         if let Some(ref linker) = self.config.linker {
             rustdoc

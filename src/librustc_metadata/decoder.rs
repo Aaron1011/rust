@@ -1315,4 +1315,3 @@ pub fn fixup_attr(mut attr: ast::Attribute) -> ast::Attribute {
     attr.id = attr::mk_attr_id();
     attr
 }
-

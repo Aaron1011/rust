@@ -3921,9 +3921,11 @@ impl Clean<Vec<Item>> for doctree::ExternCrate<'_> {
                 },
             );
 
-            if let Some(items) = inline::try_inline(cx, res, self.name,
-                                                    Some(rustc::ty::Attributes::Borrowed(self.attrs)),
-                                                    &mut visited) {
+            if let Some(items) = inline::try_inline(
+                cx, res, self.name,
+                Some(rustc::ty::Attributes::Borrowed(self.attrs)),
+                &mut visited
+            ) {
                 return items;
             }
         }
@@ -3983,9 +3985,11 @@ impl Clean<Vec<Item>> for doctree::Import<'_> {
             }
             if !denied {
                 let mut visited = FxHashSet::default();
-                if let Some(items) = inline::try_inline(cx, path.res, name,
-                                                        Some(rustc::ty::Attributes::Borrowed(self.attrs)),
-                                                        &mut visited) {
+                if let Some(items) = inline::try_inline(
+                    cx, path.res, name,
+                    Some(rustc::ty::Attributes::Borrowed(self.attrs)),
+                    &mut visited
+                ) {
                     return items;
                 }
             }

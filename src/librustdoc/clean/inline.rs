@@ -307,7 +307,9 @@ fn merge_attrs(cx: &DocContext<'_>, attrs: Attrs<'_>, other_attrs: Option<Attrs<
     cleaned
 }
 
-pub fn build_impl(cx: &DocContext<'_>, did: DefId, attrs: Option<Attrs<'_>>, ret: &mut Vec<clean::Item>) {
+pub fn build_impl(cx: &DocContext<'_>, did: DefId, attrs: Option<Attrs<'_>>,
+                  ret: &mut Vec<clean::Item>
+) {
     if !cx.renderinfo.borrow_mut().inlined.insert(did) {
         return
     }

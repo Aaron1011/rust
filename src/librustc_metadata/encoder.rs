@@ -472,7 +472,6 @@ impl<'tcx> EncodeContext<'tcx> {
 
 
         let attrs = tcx.hir().krate_attrs();
-        
         let has_default_lib_allocator = attr::contains_name(&attrs, sym::default_lib_allocator);
         let has_global_allocator = *tcx.sess.has_global_allocator.get();
         let has_panic_handler = *tcx.sess.has_panic_handler.try_get().unwrap_or(&false);
