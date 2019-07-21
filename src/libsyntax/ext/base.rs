@@ -576,6 +576,8 @@ pub struct SyntaxExtension {
     pub kind: SyntaxExtensionKind,
     /// Span of the macro definition.
     pub span: Span,
+    /// Attributes declared on the macro definition
+    pub attrs: Vec<Attribute>,
     /// Hygienic properties of spans produced by this macro by default.
     pub default_transparency: Transparency,
     /// Whitelist of unstable features that are treated as stable inside this macro.
@@ -628,6 +630,7 @@ impl SyntaxExtension {
     pub fn default(kind: SyntaxExtensionKind, edition: Edition) -> SyntaxExtension {
         SyntaxExtension {
             span: DUMMY_SP,
+            attrs: Vec::new(),
             default_transparency: kind.default_transparency(),
             allow_internal_unstable: None,
             allow_internal_unsafe: false,

@@ -20,7 +20,7 @@ use errors::FatalError;
 use syntax_pos::{Span, DUMMY_SP, symbol::InternedString, MultiSpan};
 use syntax::source_map::Spanned;
 use rustc_target::spec::abi::Abi;
-use syntax::ast::{self, CrateSugar, Ident, Name, NodeId, AsmDialect};
+use syntax::ast::{self, CrateSugar, Ident, Name, NodeId, AsmDialect, ProcMacroInfo};
 use syntax::ast::{Attribute, Label, LitKind, StrStyle, FloatTy, IntTy, UintTy};
 use syntax::attr::{InlineAttr, OptimizeAttr};
 use syntax::ext::hygiene::SyntaxContext;
@@ -725,6 +725,7 @@ pub struct ModuleItems {
 pub struct Crate {
     pub module: Mod,
     pub attrs: HirVec<Attribute>,
+    pub proc_macros: HirVec<ProcMacroInfo>,
     pub span: Span,
     pub exported_macros: HirVec<MacroDef>,
     // Attributes from non-exported macros, kept only for collecting the library feature list.

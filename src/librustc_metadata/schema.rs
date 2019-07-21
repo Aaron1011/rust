@@ -165,7 +165,6 @@ pub struct CrateRoot<'tcx> {
     pub has_panic_handler: bool,
     pub has_default_lib_allocator: bool,
     pub plugin_registrar_fn: Option<DefIndex>,
-    pub proc_macro_decls_static: Option<DefIndex>,
     pub proc_macro_stability: Option<attr::Stability>,
 
     pub crate_deps: LazySeq<CrateDep>,
@@ -176,12 +175,22 @@ pub struct CrateRoot<'tcx> {
     pub native_libraries: LazySeq<NativeLibrary>,
     pub foreign_modules: LazySeq<ForeignModule>,
     pub source_map: LazySeq<syntax_pos::SourceFile>,
-    pub def_path_table: Lazy<hir::map::definitions::DefPathTable>,
     pub impls: LazySeq<TraitImpls>,
     pub exported_symbols: LazySeq<(ExportedSymbol<'tcx>, SymbolExportLevel)>,
     pub interpret_alloc_index: LazySeq<u32>,
 
     pub entries_index: LazySeq<index::Index<'tcx>>,
+
+    /// The data for any proc macros declared by this crate
+    /// These are stored in the same order as the proc macros
+    /// are stored under their dylib symbol
+    /// This needs to come before 'def_path_table',
+    /// as we need use data from it when decoding `def_path_table.
+    /// This also needs to come at the very end of the 'Lazy/LazySeq' data,
+    /// as we need all of the other data in order to deserialize it
+    pub proc_macro_data: Option<LazySeq<ProcMacroData>>,
+    pub def_path_table: Lazy<hir::map::definitions::DefPathTable>,
+
 
     pub compiler_builtins: bool,
     pub needs_allocator: bool,
@@ -191,6 +200,20 @@ pub struct CrateRoot<'tcx> {
     pub profiler_runtime: bool,
     pub sanitizer_runtime: bool,
     pub symbol_mangling_version: SymbolManglingVersion,
+
+
+}
+
+/// Stores extra information about proc macros
+/// that would be difficult to store along with
+/// the dylib symbol.
+/// Currently, this is only used by rustdoc,
+/// which needs access to the proc macro span and
+/// attributes for inlining purposes
+#[derive(RustcEncodable, RustcDecodable)]
+pub struct ProcMacroData {
+    pub span: Lazy<Span>,
+    pub attributes: LazySeq<ast::Attribute>,
 }
 
 #[derive(RustcEncodable, RustcDecodable)]

@@ -1,8 +1,9 @@
 use std::mem;
+use std::cell::RefCell;
 
 use crate::deriving;
 
-use syntax::ast::{self, Ident};
+use syntax::ast::{self, Ident, ProcMacroInfo};
 use syntax::attr;
 use syntax::source_map::{ExpnInfo, ExpnKind, respan};
 use syntax::ext::base::{ExtCtxt, MacroKind};
@@ -29,11 +30,13 @@ struct ProcMacroDerive {
     function_name: Ident,
     span: Span,
     attrs: Vec<ast::Name>,
+    raw_attrs: Vec<ast::Attribute>
 }
 
 struct ProcMacroDef {
     function_name: Ident,
     span: Span,
+    raw_attrs: Vec<ast::Attribute>
 }
 
 struct CollectProcMacros<'a> {
@@ -85,7 +88,10 @@ pub fn modify(sess: &ParseSess,
         return krate;
     }
 
-    krate.module.items.push(mk_decls(&mut cx, &derives, &attr_macros, &bang_macros));
+    let (item, proc_macros) = mk_decls(&mut cx, &derives, &attr_macros, &bang_macros);
+    krate.module.items.push(item);
+    debug_assert!(krate.proc_macros.is_empty());
+    krate.proc_macros = proc_macros;
 
     krate
 }
@@ -185,6 +191,7 @@ impl<'a> CollectProcMacros<'a> {
                 trait_name: trait_ident.name,
                 function_name: item.ident,
                 attrs: proc_attrs,
+                raw_attrs: item.attrs.clone()
             });
         } else {
             let msg = if !self.in_root {
@@ -202,6 +209,7 @@ impl<'a> CollectProcMacros<'a> {
             self.attr_macros.push(ProcMacroDef {
                 span: item.span,
                 function_name: item.ident,
+                raw_attrs: item.attrs.clone()
             });
         } else {
             let msg = if !self.in_root {
@@ -219,6 +227,7 @@ impl<'a> CollectProcMacros<'a> {
             self.bang_macros.push(ProcMacroDef {
                 span: item.span,
                 function_name: item.ident,
+                raw_attrs: item.attrs.clone()
             });
         } else {
             let msg = if !self.in_root {
@@ -340,12 +349,16 @@ impl<'a> Visitor<'a> for CollectProcMacros<'a> {
 //              // ...
 //          ];
 //      }
+//
+// We also return create a Vec<ProcMacroInfo>,
+// representing information that will eventually
+// be serialized into the crate metadata
 fn mk_decls(
     cx: &mut ExtCtxt<'_>,
     custom_derives: &[ProcMacroDerive],
     custom_attrs: &[ProcMacroDef],
     custom_macros: &[ProcMacroDef],
-) -> P<ast::Item> {
+) -> (P<ast::Item>, Vec<ProcMacroInfo>) {
     let span = DUMMY_SP.fresh_expansion(ExpnId::root(), ExpnInfo::allow_unstable(
         ExpnKind::Macro(MacroKind::Attr, sym::proc_macro), DUMMY_SP, cx.parse_sess.edition,
         [sym::rustc_attrs, sym::proc_macro_internals][..].into(),
@@ -353,6 +366,9 @@ fn mk_decls(
 
     let hidden = cx.meta_list_item_word(span, sym::hidden);
     let doc = cx.meta_list(span, sym::doc, vec![hidden]);
+
+    let proc_macro_infos = RefCell::new(vec![]);
+
     let doc_hidden = cx.attribute(span, doc);
 
     let proc_macro = Ident::with_empty_ctxt(sym::proc_macro);
@@ -377,6 +393,10 @@ fn mk_decls(
             proc_macro, bridge, client, proc_macro_ty, method,
         ]));
         custom_derives.iter().map(|cd| {
+            proc_macro_infos.borrow_mut().push(ProcMacroInfo {
+                span: cd.span,
+                attrs: cd.raw_attrs.clone()
+            });
             cx.expr_call(span, proc_macro_ty_method_path(custom_derive), vec![
                 cx.expr_str(cd.span, cd.trait_name),
                 cx.expr_vec_slice(
@@ -386,11 +406,19 @@ fn mk_decls(
                 local_path(cd.span, cd.function_name),
             ])
         }).chain(custom_attrs.iter().map(|ca| {
+            proc_macro_infos.borrow_mut().push(ProcMacroInfo {
+                span: ca.span,
+                attrs: ca.raw_attrs.clone()
+            });
             cx.expr_call(span, proc_macro_ty_method_path(attr), vec![
                 cx.expr_str(ca.span, ca.function_name.name),
                 local_path(ca.span, ca.function_name),
             ])
         })).chain(custom_macros.iter().map(|cm| {
+            proc_macro_infos.borrow_mut().push(ProcMacroInfo {
+                span: cm.span,
+                attrs: cm.raw_attrs.clone()
+            });
             cx.expr_call(span, proc_macro_ty_method_path(bang), vec![
                 cx.expr_str(cm.span, cm.function_name.name),
                 local_path(cm.span, cm.function_name),
@@ -426,5 +454,8 @@ fn mk_decls(
         i
     });
 
-    cx.monotonic_expander().flat_map_item(module).pop().unwrap()
+    (   
+        cx.monotonic_expander().flat_map_item(module).pop().unwrap(),
+        proc_macro_infos.into_inner()
+    )
 }

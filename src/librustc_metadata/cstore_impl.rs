@@ -203,11 +203,6 @@ provide! { <'tcx> tcx, def_id, other, cdata,
             DefId { krate: def_id.krate, index }
         })
     }
-    proc_macro_decls_static => {
-        cdata.root.proc_macro_decls_static.map(|index| {
-            DefId { krate: def_id.krate, index }
-        })
-    }
     crate_disambiguator => { cdata.root.disambiguator }
     crate_hash => { cdata.root.hash }
     original_crate_name => { cdata.root.name }

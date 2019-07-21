@@ -448,6 +448,15 @@ pub struct Crate {
     pub module: Mod,
     pub attrs: Vec<Attribute>,
     pub span: Span,
+    pub proc_macros: Vec<ProcMacroInfo>
+}
+
+/// Data from any proc macro declarations
+/// we collected from this crate
+#[derive(Clone, RustcEncodable, RustcDecodable, Debug)]
+pub struct ProcMacroInfo {
+    pub span: Span,
+    pub attrs: Vec<Attribute>
 }
 
 /// Possible values inside of compile-time attribute lists.

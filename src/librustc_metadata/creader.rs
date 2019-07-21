@@ -2,8 +2,8 @@
 
 use crate::cstore::{self, CStore, CrateSource, MetadataBlob};
 use crate::locator::{self, CratePaths};
-use crate::decoder::proc_macro_def_path_table;
-use crate::schema::CrateRoot;
+use crate::decoder::{proc_macro_def_path_table, fixup_attr};
+use crate::schema::{CrateRoot, ProcMacroData};
 use rustc_data_structures::sync::{Lrc, RwLock, Lock};
 
 use rustc::hir::def_id::CrateNum;
@@ -231,26 +231,6 @@ impl<'a> CrateLoader<'a> {
 
         let dependencies: Vec<CrateNum> = cnum_map.iter().cloned().collect();
 
-        let proc_macros = crate_root.proc_macro_decls_static.map(|_| {
-            if self.sess.opts.debugging_opts.dual_proc_macros {
-                let host_lib = host_lib.unwrap();
-                self.load_derive_macros(
-                    &host_lib.metadata.get_root(),
-                    host_lib.dylib.map(|p| p.0),
-                    span
-                )
-            } else {
-                self.load_derive_macros(&crate_root, dylib.clone().map(|p| p.0), span)
-            }
-        });
-
-        let def_path_table = record_time(&self.sess.perf_stats.decode_def_path_tables_time, || {
-            if let Some(proc_macros) = &proc_macros {
-                proc_macro_def_path_table(&crate_root, proc_macros)
-            } else {
-                crate_root.def_path_table.decode((&metadata, self.sess))
-            }
-        });
 
         let interpret_alloc_index: Vec<u32> = crate_root.interpret_alloc_index
                                                         .decode(&metadata)
@@ -261,13 +241,13 @@ impl<'a> CrateLoader<'a> {
             .map(|trait_impls| (trait_impls.trait_id, trait_impls.impls))
             .collect();
 
-        let cmeta = cstore::CrateMetadata {
+        let mut cmeta = cstore::CrateMetadata {
             name: crate_root.name,
             imported_name: ident,
             extern_crate: Lock::new(None),
-            def_path_table: Lrc::new(def_path_table),
+            def_path_table: Lrc::new(Definitions::default().def_path_table().clone()),
             trait_impls,
-            proc_macros,
+            proc_macros: None,
             root: crate_root,
             blob: metadata,
             cnum_map,
@@ -283,6 +263,35 @@ impl<'a> CrateLoader<'a> {
             },
             private_dep
         };
+
+        let proc_macros = cmeta.root.proc_macro_data.as_ref().map(|proc_macros| {
+            let proc_macros = proc_macros.decode((&cmeta, self.sess));
+            if self.sess.opts.debugging_opts.dual_proc_macros {
+                let host_lib = host_lib.unwrap();
+                self.load_derive_macros(
+                    &host_lib.metadata.get_root(),
+                    host_lib.dylib.map(|p| p.0),
+                    span,
+                    proc_macros,
+                    &cmeta,
+                )
+            } else {
+                self.load_derive_macros(&cmeta.root, cmeta.source.dylib.clone().map(|p| p.0), span,
+                    proc_macros, &cmeta)
+            }
+        });
+
+        let def_path_table = record_time(&self.sess.perf_stats.decode_def_path_tables_time, || {
+            if let Some(proc_macros) = &proc_macros {
+                proc_macro_def_path_table(&cmeta.root, proc_macros)
+            } else {
+                cmeta.root.def_path_table.decode((&cmeta.blob, self.sess))
+            }
+        });
+
+        cmeta.proc_macros = proc_macros;
+        cmeta.def_path_table = Lrc::new(def_path_table);
+
 
         let cmeta = Lrc::new(cmeta);
         self.cstore.set_crate_data(cnum, cmeta.clone());
@@ -390,7 +399,7 @@ impl<'a> CrateLoader<'a> {
         match result {
             (LoadResult::Previous(cnum), None) => {
                 let data = self.cstore.get_crate_data(cnum);
-                if data.root.proc_macro_decls_static.is_some() {
+                if data.root.proc_macro_data.is_some() {
                     dep_kind = DepKind::UnexportedMacrosOnly;
                 }
                 data.dep_kind.with_lock(|data_dep_kind| {
@@ -483,7 +492,7 @@ impl<'a> CrateLoader<'a> {
                           dep_kind: DepKind)
                           -> cstore::CrateNumMap {
         debug!("resolving deps of external crate");
-        if crate_root.proc_macro_decls_static.is_some() {
+        if crate_root.proc_macro_data.is_some() {
             return cstore::CrateNumMap::new();
         }
 
@@ -582,7 +591,9 @@ impl<'a> CrateLoader<'a> {
     /// implemented as dynamic libraries, but we have a possible future where
     /// custom derive (and other macro-1.1 style features) are implemented via
     /// executables and custom IPC.
-    fn load_derive_macros(&mut self, root: &CrateRoot<'_>, dylib: Option<PathBuf>, span: Span)
+    fn load_derive_macros(&mut self, root: &CrateRoot<'_>, dylib: Option<PathBuf>, span: Span,
+                          macros: impl ExactSizeIterator<Item = ProcMacroData>,
+                          metadata: &cstore::CrateMetadata)
                           -> Vec<(ast::Name, Lrc<SyntaxExtension>)> {
         use std::{env, mem};
         use crate::dynamic_lib::DynamicLibrary;
@@ -610,7 +621,12 @@ impl<'a> CrateLoader<'a> {
             *(sym as *const &[ProcMacro])
         };
 
-        let extensions = decls.iter().map(|&decl| {
+        if macros.len() != decls.len() {
+            span_bug!(span, "proc-macro data mismatch: metadata '{:?}', decls {:?}'",
+                      macros.len(), decls.len());
+        }
+
+        let extensions = macros.zip(decls.iter()).map(|(proc_macro, &decl) | {
             let (name, kind, helper_attrs) = match decl {
                 ProcMacro::CustomDerive { trait_name, attributes, client } => {
                     let helper_attrs =
@@ -631,7 +647,14 @@ impl<'a> CrateLoader<'a> {
                 )
             };
 
+            let attrs: Vec<_> = proc_macro.attributes
+                .decode((metadata, self.sess))
+                .map(fixup_attr)
+                .collect();
+
             (Symbol::intern(name), Lrc::new(SyntaxExtension {
+                span: proc_macro.span.decode((metadata, self.sess)),
+                attrs: attrs,
                 helper_attrs,
                 ..SyntaxExtension::default(kind, root.edition)
             }))

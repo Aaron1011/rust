@@ -136,6 +136,9 @@ fn opts() -> Vec<RustcOptGroup> {
         stable("crate-name", |o| {
             o.optopt("", "crate-name", "specify the name of this crate", "NAME")
         }),
+        stable("proc-macro-crate", |o| {
+            o.optflag("", "proc-macro-crate", "specifies that this is a proc-macro crate")
+        }),
         stable("L", |o| {
             o.optmulti("L", "library-path", "directory to add to crate search path",
                        "DIR")

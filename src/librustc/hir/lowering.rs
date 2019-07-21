@@ -651,6 +651,12 @@ impl<'a> LoweringContext<'a> {
         visit::walk_crate(&mut ItemLowerer { lctx: &mut self }, c);
 
         let module = self.lower_mod(&c.module);
+        let proc_macros = c.proc_macros.iter().map(|p| {
+            ProcMacroInfo {
+                span: p.span,
+                attrs: self.lower_attrs(&c.attrs).to_vec()
+            }
+        }).collect();
         let attrs = self.lower_attrs(&c.attrs);
         let body_ids = body_ids(&self.bodies);
 
@@ -661,6 +667,7 @@ impl<'a> LoweringContext<'a> {
         hir::Crate {
             module,
             attrs,
+            proc_macros: proc_macros,
             span: c.span,
             exported_macros: hir::HirVec::from(self.exported_macros),
             non_exported_macro_attrs: hir::HirVec::from(self.non_exported_macro_attrs),

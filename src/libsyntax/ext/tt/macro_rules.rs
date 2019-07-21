@@ -429,6 +429,7 @@ pub fn compile(
     SyntaxExtension {
         kind: SyntaxExtensionKind::LegacyBang(expander),
         span: def.span,
+        attrs: def.attrs.clone(),
         default_transparency,
         allow_internal_unstable,
         allow_internal_unsafe: attr::contains_name(&def.attrs, sym::allow_internal_unsafe),

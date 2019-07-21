@@ -138,7 +138,7 @@ impl<'a: 'x, 'tcx: 'x, 'x, T: Decodable> LazySeq<T> {
     pub fn decode<M: Metadata<'a, 'tcx>>(
         self,
         meta: M,
-    ) -> impl Iterator<Item = T> + Captures<'a> + Captures<'tcx> + 'x {
+    ) -> impl ExactSizeIterator<Item = T> + Captures<'a> + Captures<'tcx> + 'x {
         let mut dcx = meta.decoder(self.position);
         dcx.lazy_state = LazyState::NodeStart(self.position);
         (0..self.len).map(move |_| T::decode(&mut dcx).unwrap())
@@ -517,7 +517,7 @@ impl<'a, 'tcx> CrateMetadata {
 
     pub fn get_span(&self, index: DefIndex, sess: &Session) -> Span {
         match self.is_proc_macro(index) {
-            true => DUMMY_SP,
+            true => self.proc_macros.as_ref().unwrap()[index.to_proc_macro_index()].1.span,
             false => self.entry(index).span.decode((self, sess)),
         }
     }
@@ -952,9 +952,13 @@ impl<'a, 'tcx> CrateMetadata {
         }
     }
 
+
     pub fn get_item_attrs(&self, node_id: DefIndex, sess: &Session) -> Lrc<[ast::Attribute]> {
         if self.is_proc_macro(node_id) {
-            return Lrc::new([]);
+            return Lrc::from(
+                self.proc_macros.as_ref().unwrap()[node_id.to_proc_macro_index()].1.attrs
+                    .clone()
+            )
         }
 
         // The attributes for a tuple struct/variant are attached to the definition, not the ctor;
@@ -982,11 +986,7 @@ impl<'a, 'tcx> CrateMetadata {
     fn get_attributes(&self, item: &Entry<'tcx>, sess: &Session) -> Vec<ast::Attribute> {
         item.attributes
             .decode((self, sess))
-            .map(|mut attr| {
-                // Need new unique IDs: old thread-local IDs won't map to new threads.
-                attr.id = attr::mk_attr_id();
-                attr
-            })
+            .map(fixup_attr)
             .collect()
     }
 
@@ -1309,3 +1309,10 @@ impl<'a, 'tcx> CrateMetadata {
         self.source_map_import_info.borrow()
     }
 }
+
+pub fn fixup_attr(mut attr: ast::Attribute) -> ast::Attribute {
+    // Need new unique IDs: old thread-local IDs won't map to new threads.
+    attr.id = attr::mk_attr_id();
+    attr
+}
+
