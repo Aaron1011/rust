@@ -697,7 +697,9 @@ pub trait PrettyPrinter<'tcx>:
             },
             ty::Array(ty, sz) => {
                 p!(write("["), print(ty), write("; "));
-                if let ConstValue::Unevaluated(..) = sz.val {
+                if self.tcx().sess.verbose() {
+                    p!(write("{:?}", sz));
+                } else if let ConstValue::Unevaluated(..) = sz.val {
                     // do not try to evalute unevaluated constants. If we are const evaluating an
                     // array length anon const, rustc will (with debug assertions) print the
                     // constant's path. Which will end up here again.
@@ -853,6 +855,11 @@ pub trait PrettyPrinter<'tcx>:
         ct: &'tcx ty::Const<'tcx>,
     ) -> Result<Self::Const, Self::Error> {
         define_scoped_cx!(self);
+
+        if self.tcx().sess.verbose() {
+            p!(write("Const({:?}: {:?})", ct.val, ct.ty));
+            return Ok(self);
+        }
 
         let u8 = self.tcx().types.u8;
         if let ty::FnDef(did, substs) = ct.ty.sty {
