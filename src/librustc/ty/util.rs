@@ -996,7 +996,26 @@ impl<'tcx> ty::TyS<'tcx> {
     }
 }
 
+/// Asserts that that the specified ParamEnvAnd<Ty> has no
+/// region inference variables, panicking if any are found.
+///
+/// This is used in queries that take a ParamEnvAnd<Ty>
+/// and call type_known_to_meet_bound_modulo_regions
+/// Since these queries enter a new inference context, any
+/// region variables in the query will either not exist,
+/// or resolve to the wrong variable (since they come from
+/// a different inference context)
+///
+/// If this happens, we bail out early, to avoid hard-to-debug
+/// ICEs or bugs later on
+fn assert_no_region_var(_query: &ty::ParamEnvAnd<'tcx, Ty<'tcx>>) {
+    /*if query.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
+        panic!("Region inference variable in query: {:?}", query);
+    }*/
+}
+
 fn is_copy_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
+    assert_no_region_var(&query);
     let (param_env, ty) = query.into_parts();
     let trait_def_id = tcx.require_lang_item(lang_items::CopyTraitLangItem);
     tcx.infer_ctxt()
@@ -1010,6 +1029,7 @@ fn is_copy_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) 
 }
 
 fn is_sized_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
+    assert_no_region_var(&query);
     let (param_env, ty) = query.into_parts();
     let trait_def_id = tcx.require_lang_item(lang_items::SizedTraitLangItem);
     tcx.infer_ctxt()
@@ -1023,6 +1043,7 @@ fn is_sized_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>)
 }
 
 fn is_freeze_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
+    assert_no_region_var(&query);
     let (param_env, ty) = query.into_parts();
     let trait_def_id = tcx.require_lang_item(lang_items::FreezeTraitLangItem);
     tcx.infer_ctxt()

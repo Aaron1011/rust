@@ -560,6 +560,7 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
             "created new region variable {:?} in {:?} with origin {:?}",
             vid, universe, origin
         );
+        debug!("region variable backtrace: {:?}", backtrace::Backtrace::new());
         return vid;
     }
 
