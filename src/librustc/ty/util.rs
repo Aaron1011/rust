@@ -768,7 +768,12 @@ impl<'tcx> ty::TyS<'tcx> {
         param_env: ty::ParamEnv<'tcx>,
         span: Span,
     ) -> bool {
-        tcx.at(span).is_copy_raw(param_env.and(self))
+        let query = param_env.and(self);
+        if query.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
+            is_copy_impl(tcx, query)
+        } else {
+            tcx.at(span).is_copy_raw(param_env.and(self))
+        }
     }
 
     /// Checks whether values of this type `T` have a size known at
@@ -778,7 +783,12 @@ impl<'tcx> ty::TyS<'tcx> {
     /// strange rules like `<T as Foo<'static>>::Bar: Sized` that
     /// actually carry lifetime requirements.
     pub fn is_sized(&'tcx self, tcx_at: TyCtxtAt<'tcx>, param_env: ty::ParamEnv<'tcx>) -> bool {
-        tcx_at.is_sized_raw(param_env.and(self))
+        let query = param_env.and(self);
+        if query.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
+            is_sized_impl(*tcx_at, query)
+        } else {
+            tcx_at.is_sized_raw(query)
+        }
     }
 
     /// Checks whether values of this type `T` implement the `Freeze`
@@ -794,11 +804,17 @@ impl<'tcx> ty::TyS<'tcx> {
         param_env: ty::ParamEnv<'tcx>,
         span: Span,
     ) -> bool {
-        tcx.at(span).is_freeze_raw(param_env.and(self))
+        let query = param_env.and(self);
+
+        if query.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
+            is_freeze_impl(tcx, query)
+        } else {
+            tcx.at(span).is_freeze_raw(query)
+        }
     }
 
     /// If `ty.needs_drop(...)` returns `true`, then `ty` is definitely
-    /// non-copy and *might* have a destructor attached; if it returns
+        /// non-copy and *might* have a destructor attached; if it returns
     /// `false`, then `ty` definitely has no destructor (i.e., no drop glue).
     ///
     /// (Note that this implies that if `ty` has a destructor attached,
@@ -1008,14 +1024,18 @@ impl<'tcx> ty::TyS<'tcx> {
 ///
 /// If this happens, we bail out early, to avoid hard-to-debug
 /// ICEs or bugs later on
-fn assert_no_region_var(_query: &ty::ParamEnvAnd<'tcx, Ty<'tcx>>) {
-    /*if query.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
+fn assert_no_region_var(query: &ty::ParamEnvAnd<'tcx, Ty<'tcx>>) {
+    if query.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
         panic!("Region inference variable in query: {:?}", query);
-    }*/
+    }
 }
 
-fn is_copy_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
+fn is_copy_query<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
     assert_no_region_var(&query);
+    is_copy_impl(tcx, query)
+}
+
+fn is_copy_impl<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
     let (param_env, ty) = query.into_parts();
     let trait_def_id = tcx.require_lang_item(lang_items::CopyTraitLangItem);
     tcx.infer_ctxt()
@@ -1028,8 +1048,13 @@ fn is_copy_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) 
         ))
 }
 
-fn is_sized_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
+fn is_sized_query<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
     assert_no_region_var(&query);
+    is_sized_impl(tcx, query)
+}
+
+
+fn is_sized_impl<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
     let (param_env, ty) = query.into_parts();
     let trait_def_id = tcx.require_lang_item(lang_items::SizedTraitLangItem);
     tcx.infer_ctxt()
@@ -1042,8 +1067,13 @@ fn is_sized_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>)
         ))
 }
 
-fn is_freeze_raw<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
+fn is_freeze_query<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
     assert_no_region_var(&query);
+    is_freeze_impl(tcx, query)
+}
+
+
+fn is_freeze_impl<'tcx>(tcx: TyCtxt<'tcx>, query: ty::ParamEnvAnd<'tcx, Ty<'tcx>>) -> bool {
     let (param_env, ty) = query.into_parts();
     let trait_def_id = tcx.require_lang_item(lang_items::FreezeTraitLangItem);
     tcx.infer_ctxt()
@@ -1189,9 +1219,9 @@ impl<'tcx> ExplicitSelf<'tcx> {
 
 pub fn provide(providers: &mut ty::query::Providers<'_>) {
     *providers = ty::query::Providers {
-        is_copy_raw,
-        is_sized_raw,
-        is_freeze_raw,
+        is_copy_raw: is_copy_query,
+        is_sized_raw: is_sized_query,
+        is_freeze_raw: is_freeze_query,
         needs_drop_raw,
         ..*providers
     };
