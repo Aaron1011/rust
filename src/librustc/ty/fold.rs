@@ -256,6 +256,14 @@ impl<'tcx> TyCtxt<'tcx> {
         have_bound_regions
     }
 
+    pub fn evaluate_nested_consts<T>(
+        self,
+        value: &T,
+        param_env: ty::ParamEnv<'tcx>
+    ) -> T where T: TypeFoldable<'tcx> {
+        value.fold_with(&mut ConstEvaluatorFolder { tcx: self, param_env })
+    }
+
     /// Folds the escaping and free regions in `value` using `f`, and
     /// sets `skipped_regions` to true if any late-bound region was found
     /// and skipped.
@@ -353,6 +361,18 @@ impl<'tcx> TyCtxt<'tcx> {
                 }
             }
         }
+    }
+}
+
+struct ConstEvaluatorFolder<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    param_env: ty::ParamEnv<'tcx>
+}
+
+impl<'tcx> TypeFolder<'tcx> for ConstEvaluatorFolder<'tcx> {
+    fn tcx<'b>(&'b self) -> TyCtxt<'tcx> { self.tcx }
+    fn fold_const(&mut self, ct: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
+        ct.eval(self.tcx(), self.param_env)
     }
 }
 

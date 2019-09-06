@@ -750,8 +750,12 @@ impl<'cx, 'tcx> SelectionContext<'cx, 'tcx> {
             None => self.check_recursion_limit(&obligation, &obligation)?
         }
 
+        let obligation = self.tcx().evaluate_nested_consts(&obligation, obligation.param_env);
+        debug!("evaluate_predicate_recursively: const-evaluated obligation = {:?}", obligation);
+
         match obligation.predicate {
             ty::Predicate::Trait(ref t) => {
+                debug!("evaluate_predicate_recursively: trait = {:?}", t);
                 debug_assert!(!t.has_escaping_bound_vars());
                 let obligation = obligation.with(t.clone());
                 self.evaluate_trait_predicate_recursively(previous_stack, obligation)

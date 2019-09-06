@@ -51,6 +51,8 @@ impl<'cx, 'tcx> InferCtxt<'cx, 'tcx> {
             .queries_canonicalized
             .fetch_add(1, Ordering::Relaxed);
 
+        debug!("canonicalize_query: {:?} {:?}", value, query_state);
+
         Canonicalizer::canonicalize(
             value,
             Some(self),

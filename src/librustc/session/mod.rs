@@ -508,7 +508,8 @@ impl Session {
         self.parse_sess.source_map()
     }
     pub fn verbose(&self) -> bool {
-        self.opts.debugging_opts.verbose
+        true
+        //self.opts.debugging_opts.verbose
     }
     pub fn time_passes(&self) -> bool {
         self.opts.debugging_opts.time_passes || self.opts.debugging_opts.time

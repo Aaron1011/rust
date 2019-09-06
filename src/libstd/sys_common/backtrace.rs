@@ -15,7 +15,7 @@ use backtrace::{BytesOrWideString, Frame, Symbol};
 pub const HEX_WIDTH: usize = 2 + 2 * mem::size_of::<usize>();
 
 /// Max number of frames to print.
-const MAX_NB_FRAMES: usize = 100;
+const MAX_NB_FRAMES: usize = 1000;
 
 /// Prints the current backtrace.
 pub fn print(w: &mut dyn Write, format: PrintFormat) -> io::Result<()> {

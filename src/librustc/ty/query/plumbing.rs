@@ -291,6 +291,10 @@ impl<'tcx> TyCtxt<'tcx> {
             self.sess.source_map().def_span(query.default_span(self, span))
         };
 
+        TyCtxt::try_print_query_stack();
+        eprintln!("Cycle error backtrace:");
+        eprintln!("{:?}", backtrace::Backtrace::new());
+
         // Disable naming impls with types in this path, since that
         // sometimes cycles itself, leading to extra cycle errors.
         // (And cycle errors around impls tend to occur during the
