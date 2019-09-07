@@ -3246,11 +3246,13 @@ fn param_env(tcx: TyCtxt<'_>, def_id: DefId) -> ParamEnv<'_> {
         if tcx.sess.opts.debugging_opts.chalk { Some(def_id) } else { None }
     );
 
-    let body_id = tcx.hir().as_local_hir_id(def_id).map_or(hir::DUMMY_HIR_ID, |id| {
+    unnormalized_env
+
+    /*let body_id = tcx.hir().as_local_hir_id(def_id).map_or(hir::DUMMY_HIR_ID, |id| {
         tcx.hir().maybe_body_owned_by(id).map_or(id, |body| body.hir_id)
     });
     let cause = traits::ObligationCause::misc(tcx.def_span(def_id), body_id);
-    traits::normalize_param_env_or_error(tcx, def_id, unnormalized_env, cause)
+    traits::normalize_param_env_or_error(tcx, def_id, unnormalized_env, cause)*/
 }
 
 fn crate_disambiguator(tcx: TyCtxt<'_>, crate_num: CrateNum) -> CrateDisambiguator {
