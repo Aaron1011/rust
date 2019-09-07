@@ -316,10 +316,10 @@ impl<'cx, 'tcx> TypeFolder<'tcx> for Canonicalizer<'cx, 'tcx> {
             }
 
             ty::ReVar(vid) => {
-                /*let r = self.infcx
+                let r = self.infcx
                     .unwrap()
                     .borrow_region_constraints()
-                    .opportunistic_resolve_var(self.tcx, vid);*/
+                    .opportunistic_resolve_var(self.tcx, vid);
                 debug!(
                     "canonical: region var found with vid {:?}, \
                      opportunistically resolved to {:?}",

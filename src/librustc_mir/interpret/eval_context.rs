@@ -665,6 +665,8 @@ impl<'mir, 'tcx, M: Machine<'mir, 'tcx>> InterpCx<'mir, 'tcx, M> {
         } else {
             self.param_env
         };
+
+
         // We use `const_eval_raw` here, and get an unvalidated result.  That is okay:
         // Our result will later be validated anyway, and there seems no good reason
         // to have to fail early here.  This is also more consistent with

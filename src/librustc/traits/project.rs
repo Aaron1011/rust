@@ -14,6 +14,7 @@ use super::util;
 
 use crate::hir::def_id::DefId;
 use crate::infer::{InferCtxt, InferOk, LateBoundRegionConversionTime};
+//use rustc::infer::canonical::OriginalQueryValues;
 use crate::infer::type_variable::{TypeVariableOrigin, TypeVariableOriginKind};
 use rustc_data_structures::snapshot_map::{Snapshot, SnapshotMap};
 use rustc_macros::HashStable;
@@ -396,7 +397,12 @@ impl<'a, 'b, 'tcx> TypeFolder<'tcx> for AssocTypeNormalizer<'a, 'b, 'tcx> {
     }
 
     fn fold_const(&mut self, constant: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
+        /*let canonical_env = self.selcx.infcx().canonicalize_query(
+            &self.param_env,
+            &mut OriginalQueryValues::default()
+        ).value;*/
         constant.eval(self.selcx.tcx(), self.param_env)
+        //constant.eval(self.selcx.tcx(), canonical_env)
     }
 }
 

@@ -190,7 +190,12 @@ impl<'cx, 'tcx> TypeFolder<'tcx> for QueryNormalizer<'cx, 'tcx> {
     }
 
     fn fold_const(&mut self, constant: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
-        constant.eval(self.infcx.tcx, self.param_env)
+        let canonical_env = self.infcx.canonicalize_query(
+            &self.param_env,
+            &mut OriginalQueryValues::default()
+        ).value;
+        //constant.eval(self.infcx.tcx, self.param_env)
+        constant.eval(self.infcx.tcx, canonical_env)
     }
 }
 

@@ -526,6 +526,7 @@ fn unsafety_check_result(tcx: TyCtxt<'_>, def_id: DefId) -> UnsafetyCheckResult 
     };
 
     let param_env = tcx.param_env(def_id);
+    debug!("unsafety_violations({:?}): param_env = {:?}", def_id, param_env);
 
     let id = tcx.hir().as_local_hir_id(def_id).unwrap();
     let (const_context, min_const_fn) = match tcx.hir().body_owner_kind(id) {

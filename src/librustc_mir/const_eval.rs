@@ -11,7 +11,7 @@ use rustc::hir::def::DefKind;
 use rustc::hir::def_id::DefId;
 use rustc::mir::interpret::{ConstEvalErr, ErrorHandled, ScalarMaybeUndef};
 use rustc::mir;
-use rustc::ty::{self, Ty, TyCtxt, subst::Subst};
+use rustc::ty::{self, Ty, TyCtxt, TypeFoldable, subst::Subst};
 use rustc::ty::layout::{self, LayoutOf, VariantIdx};
 use rustc::traits::Reveal;
 use rustc_data_structures::fx::FxHashMap;
@@ -606,9 +606,26 @@ pub fn const_eval_provider<'tcx>(
     })
 }
 
+struct ReVarEraser<'tcx> {
+    tcx: TyCtxt<'tcx>
+}
+
+impl<'tcx> ty::fold::TypeFolder<'tcx> for ReVarEraser<'tcx> {
+    fn tcx<'b>(&'b self) -> TyCtxt<'tcx> {
+        self.tcx
+    }
+
+    fn fold_region(&mut self, r: ty::Region<'tcx>) -> ty::Region<'tcx> {
+        match r {
+            ty::ReVar(_) => self.tcx.lifetimes.re_erased,
+            _ => r
+        }
+    }
+}
+
 pub fn const_eval_raw_provider<'tcx>(
     tcx: TyCtxt<'tcx>,
-    key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>,
+    mut key: ty::ParamEnvAnd<'tcx, GlobalId<'tcx>>,
 ) -> ::rustc::mir::interpret::ConstEvalRawResult<'tcx> {
     // Because the constant is computed twice (once per value of `Reveal`), we are at risk of
     // reporting the same error twice here. To resolve this, we check whether we can evaluate the
@@ -616,6 +633,14 @@ pub fn const_eval_raw_provider<'tcx>(
     // computed. For a large percentage of constants that will already have succeeded. Only
     // associated constants of generic functions will fail due to not enough monomorphization
     // information being available.
+
+    /*if key.has_type_flags(ty::TypeFlags::HAS_RE_INFER) {
+        panic!("Inference variable encountered when running const_eval: {:?}", key);
+    }*/
+
+    debug!("const_eval_raw_provider: erasing key.param_env {:?}", key);
+    key.param_env = key.param_env.fold_with(&mut ReVarEraser { tcx });
+    debug!("const_eval_raw_provider: erased = {:?}", key);
 
     // In case we fail in the `UserFacing` variant, we just do the real computation.
     if key.param_env.reveal == Reveal::All {
