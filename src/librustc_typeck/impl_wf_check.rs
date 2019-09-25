@@ -13,6 +13,8 @@ use rustc::hir;
 use rustc::hir::itemlikevisit::ItemLikeVisitor;
 use rustc::hir::def_id::DefId;
 use rustc::ty::{self, TyCtxt, TypeFoldable};
+use rustc::ty::fold::TypeVisitor;
+use rustc::mir::interpret::ConstValue;
 use rustc::ty::query::Providers;
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -84,6 +86,7 @@ impl ItemLikeVisitor<'tcx> for ImplWfCheck<'tcx> {
                                                 impl_def_id,
                                                 impl_item_refs);
             enforce_impl_items_are_distinct(self.tcx, impl_item_refs);
+            enforce_const_params_in_where_clause(self.tcx, impl_def_id);
         }
     }
 
@@ -91,6 +94,73 @@ impl ItemLikeVisitor<'tcx> for ImplWfCheck<'tcx> {
 
     fn visit_impl_item(&mut self, _impl_item: &'tcx hir::ImplItem) { }
 }
+
+fn enforce_const_params_in_where_clause(
+    tcx: TyCtxt<'_>,
+    impl_def_id: DefId,
+) {
+
+    struct ConstParamChecker<'tcx> {
+        tcx: TyCtxt<'tcx>,
+        bad_consts: Vec<(ConstValue<'tcx>, Vec<Span>)>
+    }
+
+    impl<'tcx> TypeVisitor<'tcx> for ConstParamChecker<'tcx> {
+        fn visit_const(&mut self, c: &'tcx ty::Const<'tcx>) -> bool {
+            match c.val {
+                ConstValue::Param(..) => {},
+                ConstValue::Unevaluated(did, _) => {
+                    let use_spans = self.tcx.const_eval_used_params(did);
+                    if !use_spans.is_empty() {
+                        self.bad_consts.push((c.val, use_spans));
+                    }
+                },
+                _ => {}
+            };
+            false
+        }
+    }
+
+    let mut checker = ConstParamChecker { bad_consts: vec![], tcx };
+    tcx.predicates_of(impl_def_id).visit_with(&mut checker);
+    let from_where_clauses = checker.bad_consts;
+
+    checker = ConstParamChecker { bad_consts: vec![], tcx };
+    tcx.impl_trait_ref(impl_def_id).visit_with(&mut checker);
+    let from_trait_ref = checker.bad_consts;
+
+    for ((bad_const, use_spans), where_clause) in from_where_clauses.into_iter().map(|c| {
+        (c, true)
+    }).chain(from_trait_ref.into_iter().map(|c| (c, false))) {
+        let span = match bad_const {
+            ConstValue::Unevaluated(did, _) => tcx.def_span(did),
+            _ => tcx.def_span(impl_def_id)
+        };
+
+        let desc = if where_clause {
+            "`where` clause"
+        } else {
+            "trait reference"
+        };
+
+        let mut err = struct_span_err!(
+            tcx.sess,
+            span,
+            E0207,
+            "const parameters are not supported inside const expressions when writing a {}",
+            desc
+        );
+
+        for sp in use_spans {
+            err.span_note(sp, "const parameter used here"); 
+        }
+        
+        err
+        .span_label(span, "not a const parameter")
+        .emit();
+    }
+}
+
 
 fn enforce_impl_params_are_constrained(
     tcx: TyCtxt<'_>,

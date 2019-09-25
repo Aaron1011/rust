@@ -454,6 +454,15 @@ rustc_queries! {
             }
         }
 
+        query const_eval_used_params(key: DefId)
+            -> Vec<Span> {
+            no_force
+            desc { |tcx|
+                "getting used params of `{}`",
+                tcx.def_path_str(key)
+            }
+        }
+
         /// Extracts a field of a (variant of a) const.
         query const_field(
             key: ty::ParamEnvAnd<'tcx, (&'tcx ty::Const<'tcx>, mir::Field)>

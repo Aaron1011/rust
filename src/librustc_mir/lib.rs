@@ -57,6 +57,7 @@ pub fn provide(providers: &mut Providers<'_>) {
     monomorphize::partitioning::provide(providers);
     providers.const_eval = const_eval::const_eval_provider;
     providers.const_eval_raw = const_eval::const_eval_raw_provider;
+    providers.const_eval_used_params = const_eval::const_eval_used_params;
     providers.check_match = hair::pattern::check_match;
     providers.const_field = |tcx, param_env_and_value| {
         let (param_env, (value, field)) = param_env_and_value.into_parts();

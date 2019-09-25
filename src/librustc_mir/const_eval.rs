@@ -10,11 +10,12 @@ use std::convert::TryInto;
 use rustc::hir::def::DefKind;
 use rustc::hir::def_id::DefId;
 use rustc::mir::interpret::{ConstEvalErr, ErrorHandled, ScalarMaybeUndef};
-use rustc::mir;
-use rustc::ty::{self, Ty, TyCtxt, subst::Subst};
+use rustc::mir::{self, Body, Location};
+use rustc::mir::visit::{Visitor, TyContext};
+use rustc::ty::{self, Ty, TyCtxt, Const, TypeFoldable, subst::Subst, fold::TypeFolder};
 use rustc::ty::layout::{self, LayoutOf, VariantIdx};
 use rustc::traits::Reveal;
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use crate::interpret::eval_nullary_intrinsic;
 
 use syntax::source_map::{Span, DUMMY_SP};
@@ -582,6 +583,123 @@ fn validate_and_turn_into_const<'tcx>(
             Err(err) => err,
         }
     })
+}
+
+pub fn const_eval_used_params<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    did: DefId
+) -> Vec<Span> {
+
+    debug!("const_eval_used_params: {:?}", did);
+
+    let span = tcx.def_span(did);
+    let ecx = InterpCx::new(
+        tcx.at(span),
+        ty::ParamEnv::empty(),
+        CompileTimeInterpreter::new(),
+        Default::default()
+    );
+
+    struct ParamCollector<'a, 'tcx> {
+        tcx: TyCtxt<'tcx>,
+        body: &'a Body<'tcx>,
+        uses: FxHashSet<Span>,
+        cur_span: Span
+    }
+
+    impl<'a, 'tcx> TypeFolder<'tcx> for ParamCollector<'a, 'tcx> {
+        fn tcx(&self) -> TyCtxt<'tcx> {
+            self.tcx
+        }
+
+        fn fold_ty(&mut self, ty: Ty<'tcx>) -> Ty<'tcx> {
+            debug!("const_eval_used_params: folding type {:?}", ty);
+            match ty.kind {
+                ty::Param(..) => {
+                    self.uses.insert(self.cur_span);
+                },
+                _ => {}
+            };
+
+            ty.super_fold_with(self)
+        }
+
+        fn fold_const(&mut self, ct: &'tcx ty::Const<'tcx>) -> &'tcx ty::Const<'tcx> {
+            debug!("const_eval_used_params: folding const {:?}", ct);
+            match ct.val {
+                ConstValue::Param(..) => {
+                    self.uses.insert(self.cur_span);
+                }
+                ConstValue::Unevaluated(inner_did, ..) => {
+                    // Recursively determine any usages for the inner const
+                    let inner_uses = self.tcx.const_eval_used_params(inner_did);
+                    self.uses.extend(inner_uses);
+                },
+                _ => {}
+            };
+            ct.super_fold_with(self)
+        }
+    }
+
+    impl<'a, 'tcx> Visitor<'tcx> for ParamCollector<'a, 'tcx> {
+        fn visit_const(&mut self, constant: &&'tcx Const<'tcx>, loc: Location) {
+            debug!("const_eval_used_params: found nested const {:?} at {:?}", constant, loc);
+            match constant.val {
+                ConstValue::Param(..) => {
+                    self.uses.insert(self.body.source_info(loc).span);
+                },
+                ConstValue::Unevaluated(inner_did, ..) => {
+                    // Recursively determine any usages for the inner const
+                    let inner_uses = self.tcx.const_eval_used_params(inner_did);
+                    self.uses.extend(inner_uses);
+                },
+                _ => {}
+            }
+        }
+
+        fn visit_ty(&mut self, ty: Ty<'tcx>, context: mir::visit::TyContext) {
+            debug!("const_eval_used_params: found type {:?} with context: {:?}", ty, context);
+            let span = match context {
+                TyContext::LocalDecl { source_info, .. } |
+                TyContext::ReturnTy(source_info) |
+                TyContext::YieldTy(source_info) => {
+                    source_info.span
+                },
+                TyContext::UserTy(sp) => sp,
+                TyContext::Location(loc) => self.body.source_info(loc).span
+            };
+
+            if let ty::Adt(did, substs) = ty.kind {
+                debug!("const_eval_used_params: found ADT '{:?}': {:?}", did, substs);
+            }
+
+            match ty.kind {
+                ty::Param(..) => {
+                    self.uses.insert(span);
+                }
+                _ => {
+                    let old_span = self.cur_span;
+                    self.cur_span = span;
+                    ty.fold_with(self);
+                    self.cur_span = old_span;
+                }
+            }
+            self.super_ty(ty);
+        }
+    }
+
+
+    let mir = ecx.load_mir(ty::InstanceDef::Item(did), None).expect("Failed to load mir!");
+    let mut collector = ParamCollector { tcx, body: &mir, uses: Default::default(), cur_span: DUMMY_SP };
+
+
+    collector.visit_body(mir);
+
+    let mut uses: Vec<Span> = collector.uses.into_iter().collect();
+    uses.sort();
+
+    debug!("const_eval_used_params({:?}): found {:?}", did, uses);
+    uses
 }
 
 pub fn const_eval_provider<'tcx>(
