@@ -309,6 +309,16 @@ pub enum ObligationCauseCode<'tcx> {
     TrivialBound,
 
     AssocTypeBound(Box<AssocTypeBoundData>),
+
+    OpaqueLowerBound {
+        def_id: DefId,
+        ty: Ty<'tcx>,
+    },
+
+    OpaqueUpperBound {
+        def_id: DefId,
+        ty: Ty<'tcx>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

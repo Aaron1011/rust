@@ -1,3 +1,16 @@
+error[E0277]: the size for values of type `impl Deref<Target = Self>` cannot be known at compilation time
+  --> $DIR/issue-57700.rs:14:5
+   |
+LL |     type Bar = impl Foo;
+   |     ^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+LL | 
+LL |     fn foo(self: impl Deref<Target = Self>) -> Self::Bar {
+   |                  ------------------------- help: consider further restricting this bound: `impl Deref<Target = Self> + std::marker::Sized`
+   |
+   = help: the trait `std::marker::Sized` is not implemented for `impl Deref<Target = Self>`
+   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
+   = note: the type `impl Deref<Target = Self>` must only rely on bounds defined on the type
+
 error: type parameter `impl Deref<Target = Self>` is part of concrete type but not used in parameter list for the `impl Trait` type alias
   --> $DIR/issue-57700.rs:16:58
    |
@@ -8,5 +21,6 @@ LL | |         self
 LL | |     }
    | |_____^
 
-error: aborting due to previous error
+error: aborting due to 2 previous errors
 
+For more information about this error, try `rustc --explain E0277`.

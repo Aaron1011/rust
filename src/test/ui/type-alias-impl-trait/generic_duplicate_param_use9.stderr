@@ -1,10 +1,84 @@
+error[E0277]: the trait bound `T: Foo` is not satisfied in `(T, U, <T as Foo>::Bar)`
+  --> $DIR/generic_duplicate_param_use9.rs:7:1
+   |
+LL | type Two<A, B> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ within `(T, U, <T as Foo>::Bar)`, the trait `Foo` is not implemented for `T`
+...
+LL | fn two<T: Debug + Foo, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |        -- help: consider further restricting this bound: `T: Foo +`
+LL |     (t, u, T::BAR)
+   |     -------------- this returned value is of type `(T, U, <T as Foo>::Bar)`
+   |
+   = note: required because it appears within the type `(T, U, <T as Foo>::Bar)`
+   = note: the type `(T, U, <T as Foo>::Bar)` must only rely on bounds defined on the type
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use9.rs:7:1
+   |
+LL | type Two<A, B> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn two<T: Debug + Foo, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |        -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     (t, u, T::BAR)
+   |     -------------- this returned value is of type `(T, U, <T as Foo>::Bar)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, U, <T as Foo>::Bar)`
+   = note: the type `(T, U, <T as Foo>::Bar)` must only rely on bounds defined on the type
+
+error[E0277]: `U` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use9.rs:7:1
+   |
+LL | type Two<A, B> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `U` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn two<T: Debug + Foo, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |                        -- help: consider further restricting this bound: `U: std::fmt::Debug +`
+LL |     (t, u, T::BAR)
+   |     -------------- this returned value is of type `(T, U, <T as Foo>::Bar)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `U`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, U, <T as Foo>::Bar)`
+   = note: the type `(T, U, <T as Foo>::Bar)` must only rely on bounds defined on the type
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use9.rs:7:1
+   |
+LL | type Two<A, B> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T: Debug, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |          -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     (t, u, 42)
+   |     ---------- this returned value is of type `(T, U, {integer})`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, U, {integer})`
+   = note: the type `(T, U, {integer})` must only rely on bounds defined on the type
+
+error[E0277]: `U` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use9.rs:7:1
+   |
+LL | type Two<A, B> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `U` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T: Debug, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |                    -- help: consider further restricting this bound: `U: std::fmt::Debug +`
+LL |     (t, u, 42)
+   |     ---------- this returned value is of type `(T, U, {integer})`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `U`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, U, {integer})`
+   = note: the type `(T, U, {integer})` must only rely on bounds defined on the type
+
 error: concrete type differs from previous defining opaque type use
   --> $DIR/generic_duplicate_param_use9.rs:18:1
    |
 LL | / fn three<T: Debug, U: Debug>(t: T, u: U) -> Two<T, U> {
 LL | |     (t, u, 42)
 LL | | }
-   | |_^ expected `(A, B, <A as Foo>::Bar)`, got `(A, B, i32)`
+   | |_^ expected `(A, B, <A as Foo>::Bar)`, got `[type error]`
    |
 note: previous use here
   --> $DIR/generic_duplicate_param_use9.rs:14:1
@@ -14,5 +88,6 @@ LL | |     (t, u, T::BAR)
 LL | | }
    | |_^
 
-error: aborting due to previous error
+error: aborting due to 6 previous errors
 
+For more information about this error, try `rustc --explain E0277`.

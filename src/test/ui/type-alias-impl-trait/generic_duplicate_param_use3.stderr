@@ -1,3 +1,18 @@
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use3.rs:8:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+LL | 
+LL | fn one<T: Debug>(t: T) -> Two<T, T> {
+   |        -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |
+LL |     t
+   |     - this returned value is of type `T`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: the type `T` must only rely on bounds defined on the type
+
 error: defining opaque type use restricts opaque type by using the generic parameter `T` twice
   --> $DIR/generic_duplicate_param_use3.rs:10:1
    |
@@ -6,6 +21,35 @@ LL | |
 LL | |     t
 LL | | }
    | |_^
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use3.rs:8:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn two<T: Debug, U>(t: T, _: U) -> Two<T, U> {
+   |        -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     t
+   |     - this returned value is of type `T`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: the type `T` must only rely on bounds defined on the type
+
+error[E0277]: `U` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use3.rs:8:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `U` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T, U: Debug>(_: T, u: U) -> Two<T, U> {
+   |             -- help: consider further restricting this bound: `U: std::fmt::Debug +`
+LL |
+LL |     u
+   |     - this returned value is of type `U`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `U`
+   = note: the type `U` must only rely on bounds defined on the type
 
 error: concrete type's generic parameters differ from previous defining use
   --> $DIR/generic_duplicate_param_use3.rs:19:1
@@ -24,5 +68,6 @@ LL | |     t
 LL | | }
    | |_^
 
-error: aborting due to 2 previous errors
+error: aborting due to 5 previous errors
 
+For more information about this error, try `rustc --explain E0277`.

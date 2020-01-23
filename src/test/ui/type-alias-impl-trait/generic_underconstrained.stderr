@@ -12,8 +12,6 @@ LL | type Underconstrained<T: Trait> = impl 'static;
 ...
 LL | fn underconstrain<T>(_: T) -> Underconstrained<T> {
    |                   - help: consider restricting this bound: `T: Trait`
-   |
-   = note: the return type of a function must have a statically known size
 
 error: aborting due to 2 previous errors
 

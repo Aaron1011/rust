@@ -1,3 +1,50 @@
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use6.rs:8:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+LL | 
+LL | fn two<T: Debug, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |        -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     (t, t)
+   |     ------ this returned value is of type `(T, T)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, T)`
+   = note: the type `(T, T)` must only rely on bounds defined on the type
+
+error[E0277]: `U` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use6.rs:8:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `U` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T: Debug, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |                    -- help: consider further restricting this bound: `U: std::fmt::Debug +`
+LL |
+LL |     (u, t)
+   |     ------ this returned value is of type `(U, T)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `U`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(U, T)`
+   = note: the type `(U, T)` must only rely on bounds defined on the type
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use6.rs:8:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T: Debug, U: Debug>(t: T, u: U) -> Two<T, U> {
+   |          -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |
+LL |     (u, t)
+   |     ------ this returned value is of type `(U, T)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(U, T)`
+   = note: the type `(U, T)` must only rely on bounds defined on the type
+
 error: concrete type differs from previous defining opaque type use
   --> $DIR/generic_duplicate_param_use6.rs:14:1
    |
@@ -15,5 +62,6 @@ LL | |     (t, t)
 LL | | }
    | |_^
 
-error: aborting due to previous error
+error: aborting due to 4 previous errors
 
+For more information about this error, try `rustc --explain E0277`.

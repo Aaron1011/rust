@@ -1,3 +1,30 @@
+error[E0277]: the size for values of type `T` cannot be known at compilation time
+  --> $DIR/issue-53598.rs:18:5
+   |
+LL |     type Item = impl Debug;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+LL | 
+LL |     fn foo<T: Debug>(_: T) -> Self::Item {
+   |            -- help: consider further restricting this bound: `T: std::marker::Sized +`
+   |
+   = help: the trait `std::marker::Sized` is not implemented for `T`
+   = note: to learn more, visit <https://doc.rust-lang.org/book/ch19-04-advanced-types.html#dynamically-sized-types-and-the-sized-trait>
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `S<T>`
+   = note: the type `S<T>` must only rely on bounds defined on the type
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/issue-53598.rs:18:5
+   |
+LL |     type Item = impl Debug;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+LL | 
+LL |     fn foo<T: Debug>(_: T) -> Self::Item {
+   |            -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `S<T>`
+   = note: the type `S<T>` must only rely on bounds defined on the type
+
 error: type parameter `T` is part of concrete type but not used in parameter list for the `impl Trait` type alias
   --> $DIR/issue-53598.rs:20:42
    |
@@ -8,5 +35,6 @@ LL | |         S::<T>(Default::default())
 LL | |     }
    | |_____^
 
-error: aborting due to previous error
+error: aborting due to 3 previous errors
 
+For more information about this error, try `rustc --explain E0277`.

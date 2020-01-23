@@ -535,6 +535,12 @@ impl<'a, 'tcx> Lift<'tcx> for traits::ObligationCauseCode<'a> {
             super::BlockTailExpression(id) => Some(super::BlockTailExpression(id)),
             super::TrivialBound => Some(super::TrivialBound),
             super::AssocTypeBound(ref data) => Some(super::AssocTypeBound(data.clone())),
+            super::OpaqueLowerBound { def_id, ty } => {
+                tcx.lift(&ty).map(|ty| super::OpaqueLowerBound { def_id, ty })
+            }
+            super::OpaqueUpperBound { def_id, ty } => {
+                tcx.lift(&ty).map(|ty| super::OpaqueUpperBound { def_id, ty })
+            }
         }
     }
 }

@@ -1,3 +1,19 @@
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/not_a_defining_use.rs:7:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+LL | 
+LL | fn two<T: Debug>(t: T) -> Two<T, u32> {
+   |        -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |
+LL |     (t, 4i8)
+   |     -------- this returned value is of type `(T, i8)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, i8)`
+   = note: the type `(T, i8)` must only rely on bounds defined on the type
+
 error: defining opaque type use does not fully define opaque type: generic parameter `U` is specified as concrete type `u32`
   --> $DIR/not_a_defining_use.rs:9:1
    |
@@ -6,6 +22,50 @@ LL | |
 LL | |     (t, 4i8)
 LL | | }
    | |_^
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/not_a_defining_use.rs:7:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T: Debug, U>(t: T) -> Two<T, U> {
+   |          -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     (t, 5i8)
+   |     -------- this returned value is of type `(T, i8)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, i8)`
+   = note: the type `(T, i8)` must only rely on bounds defined on the type
+
+error[E0277]: the trait bound `U: Bar` is not satisfied in `(T, <U as Bar>::Blub)`
+  --> $DIR/not_a_defining_use.rs:7:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ within `(T, <U as Bar>::Blub)`, the trait `Bar` is not implemented for `U`
+...
+LL | fn four<T: Debug, U: Bar>(t: T) -> Two<T, U> {
+   |                   -- help: consider further restricting this bound: `U: Bar +`
+LL |     (t, <U as Bar>::FOO)
+   |     -------------------- this returned value is of type `(T, <U as Bar>::Blub)`
+   |
+   = note: required because it appears within the type `(T, <U as Bar>::Blub)`
+   = note: the type `(T, <U as Bar>::Blub)` must only rely on bounds defined on the type
+
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/not_a_defining_use.rs:7:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn four<T: Debug, U: Bar>(t: T) -> Two<T, U> {
+   |         -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     (t, <U as Bar>::FOO)
+   |     -------------------- this returned value is of type `(T, <U as Bar>::Blub)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, <U as Bar>::Blub)`
+   = note: the type `(T, <U as Bar>::Blub)` must only rely on bounds defined on the type
 
 error: concrete type differs from previous defining opaque type use
   --> $DIR/not_a_defining_use.rs:30:1
@@ -23,5 +83,6 @@ LL | |     (t, 5i8)
 LL | | }
    | |_^
 
-error: aborting due to 2 previous errors
+error: aborting due to 6 previous errors
 
+For more information about this error, try `rustc --explain E0277`.

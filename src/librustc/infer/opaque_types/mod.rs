@@ -1177,19 +1177,28 @@ impl<'a, 'tcx> Instantiator<'a, 'tcx> {
             // This also instantiates nested instances of `impl Trait`.
             let predicate = self.instantiate_opaque_types_in_map(&predicate);
 
-            let cause = traits::ObligationCause::new(span, self.body_id, traits::SizedReturnType);
+            let first_cause = traits::ObligationCause::new(
+                span,
+                self.body_id,
+                traits::OpaqueLowerBound { def_id, ty: ty_var },
+            );
+            let second_cause = traits::ObligationCause::new(
+                span,
+                self.body_id,
+                traits::OpaqueUpperBound { def_id, ty: ty_var },
+            );
 
             // Require that the predicate holds for the concrete type.
             debug!(
                 "instantiate_opaque_types: predicate={:?}, opaque_param_env={:?}",
                 predicate, opaque_param_env
             );
+            self.obligations.push(traits::Obligation::new(first_cause, self.param_env, predicate));
             self.obligations.push(traits::Obligation::new(
-                cause.clone(),
-                self.param_env,
+                second_cause,
+                opaque_param_env,
                 predicate,
             ));
-            self.obligations.push(traits::Obligation::new(cause, opaque_param_env, predicate));
         }
 
         ty_var

@@ -723,7 +723,9 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
         obligation: &PredicateObligation<'tcx>,
     ) {
         match obligation.cause.code.peel_derives() {
-            ObligationCauseCode::SizedReturnType => {}
+            ObligationCauseCode::SizedReturnType
+            | ObligationCauseCode::OpaqueLowerBound { .. }
+            | ObligationCauseCode::OpaqueUpperBound { .. } => {}
             _ => return,
         }
 
@@ -1602,6 +1604,13 @@ impl<'a, 'tcx> InferCtxt<'a, 'tcx> {
                 for sp in &data.bounds {
                     err.span_label(*sp, "restricted in this bound");
                 }
+            }
+            ObligationCauseCode::OpaqueLowerBound { .. } => {}
+            ObligationCauseCode::OpaqueUpperBound { def_id, ty } => {
+                err.note(&format!(
+                    "the type `{}` must only rely on bounds defined on the type",
+                    self.resolve_vars_if_possible(&ty)
+                ));
             }
         }
     }

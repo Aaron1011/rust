@@ -1,3 +1,34 @@
+error[E0277]: `T` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use8.rs:7:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `T` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+LL | 
+LL | fn two<T: Debug, U: Debug>(t: T, _: U) -> Two<T, U> {
+   |        -- help: consider further restricting this bound: `T: std::fmt::Debug +`
+LL |     (t, 4u32)
+   |     --------- this returned value is of type `(T, u32)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `T`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(T, u32)`
+   = note: the type `(T, u32)` must only rely on bounds defined on the type
+
+error[E0277]: `U` doesn't implement `std::fmt::Debug`
+  --> $DIR/generic_duplicate_param_use8.rs:7:1
+   |
+LL | type Two<T, U> = impl Debug;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `U` cannot be formatted using `{:?}` because it doesn't implement `std::fmt::Debug`
+...
+LL | fn three<T: Debug, U: Debug>(_: T, u: U) -> Two<T, U> {
+   |                    -- help: consider further restricting this bound: `U: std::fmt::Debug +`
+LL |
+LL |     (u, 4u32)
+   |     --------- this returned value is of type `(U, u32)`
+   |
+   = help: the trait `std::fmt::Debug` is not implemented for `U`
+   = note: required because of the requirements on the impl of `std::fmt::Debug` for `(U, u32)`
+   = note: the type `(U, u32)` must only rely on bounds defined on the type
+
 error: concrete type differs from previous defining opaque type use
   --> $DIR/generic_duplicate_param_use8.rs:13:1
    |
@@ -15,5 +46,6 @@ LL | |     (t, 4u32)
 LL | | }
    | |_^
 
-error: aborting due to previous error
+error: aborting due to 3 previous errors
 
+For more information about this error, try `rustc --explain E0277`.
