@@ -1121,9 +1121,13 @@ impl<'a, 'tcx> Instantiator<'a, 'tcx> {
         debug!("instantiate_opaque_types: predicates={:#?}", predicates_of,);
         let bounds = predicates_of.instantiate(tcx, substs);
 
-        let param_env = tcx.param_env(def_id);
-        let InferOk { value: bounds, obligations } =
-            infcx.partially_normalize_associated_types_in(span, self.body_id, param_env, &bounds);
+        let opaque_param_env = tcx.param_env(def_id);
+        let InferOk { value: bounds, obligations } = infcx.partially_normalize_associated_types_in(
+            span,
+            self.body_id,
+            opaque_param_env,
+            &bounds,
+        );
         self.obligations.extend(obligations);
 
         debug!("instantiate_opaque_types: bounds={:?}", bounds);
@@ -1176,8 +1180,16 @@ impl<'a, 'tcx> Instantiator<'a, 'tcx> {
             let cause = traits::ObligationCause::new(span, self.body_id, traits::SizedReturnType);
 
             // Require that the predicate holds for the concrete type.
-            debug!("instantiate_opaque_types: predicate={:?}", predicate);
-            self.obligations.push(traits::Obligation::new(cause, self.param_env, predicate));
+            debug!(
+                "instantiate_opaque_types: predicate={:?}, opaque_param_env={:?}",
+                predicate, opaque_param_env
+            );
+            self.obligations.push(traits::Obligation::new(
+                cause.clone(),
+                self.param_env,
+                predicate,
+            ));
+            self.obligations.push(traits::Obligation::new(cause, opaque_param_env, predicate));
         }
 
         ty_var
