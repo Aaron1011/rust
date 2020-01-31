@@ -983,6 +983,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
     }
 
     fn get_caller_location(&mut self, bx: &mut Bx, span: Span) -> OperandRef<'tcx, Bx::Value> {
+        debug!("get_caller_location: self.caller_location={:?} span={:?}",
+               self.caller_location, span);
+
         self.caller_location.unwrap_or_else(|| {
             let topmost = span.ctxt().outer_expn().expansion_cause().unwrap_or(span);
             let caller = bx.tcx().sess.source_map().lookup_char_pos(topmost.lo());
@@ -991,6 +994,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 caller.line as u32,
                 caller.col_display as u32 + 1,
             ));
+            debug!("get_caller_location: const_loc = {:?}", const_loc);
             OperandRef::from_const(bx, const_loc)
         })
     }

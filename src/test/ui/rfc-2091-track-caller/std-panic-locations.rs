@@ -9,6 +9,7 @@
 fn main() {
     // inspect the `PanicInfo` we receive to ensure the right file is the source
     std::panic::set_hook(Box::new(|info| {
+        println!("Hook: {:?}", info);
         let actual = info.location().unwrap();
         if actual.file() != file!() {
             eprintln!("expected a location in the test file, found {:?}", actual);
@@ -22,17 +23,17 @@ fn main() {
 
     let nope: Option<()> = None;
     assert_panicked(|| nope.unwrap());
-    assert_panicked(|| nope.expect(""));
+    assert_panicked(|| nope.expect("First"));
 
     let yep: Option<()> = Some(());
     assert_panicked(|| yep.unwrap_none());
-    assert_panicked(|| yep.expect_none(""));
+    assert_panicked(|| yep.expect_none("Second"));
 
     let oops: Result<(), ()> = Err(());
     assert_panicked(|| oops.unwrap());
-    assert_panicked(|| oops.expect(""));
+    assert_panicked(|| oops.expect("Third"));
 
     let fine: Result<(), ()> = Ok(());
     assert_panicked(|| fine.unwrap_err());
-    assert_panicked(|| fine.expect_err(""));
+    assert_panicked(|| fine.expect_err("Fourth"));
 }
