@@ -18,15 +18,6 @@ pub enum CrateNum {
     Index(CrateId),
 }
 
-impl ::std::fmt::Debug for CrateNum {
-    fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match self {
-            CrateNum::Index(id) => write!(fmt, "crate{}", id.private),
-            CrateNum::ReservedForIncrCompCache => write!(fmt, "crate for decoding incr comp cache"),
-        }
-    }
-}
-
 /// Item definitions in the currently-compiled crate would have the `CrateNum`
 /// `LOCAL_CRATE` in their `DefId`.
 pub const LOCAL_CRATE: CrateNum = CrateNum::Index(CrateId::from_u32_const(0));
@@ -97,6 +88,15 @@ impl rustc_serialize::UseSpecializedEncodable for CrateNum {
 impl rustc_serialize::UseSpecializedDecodable for CrateNum {
     fn default_decode<D: Decoder>(d: &mut D) -> Result<CrateNum, D::Error> {
         Ok(CrateNum::from_u32(d.read_u32()?))
+    }
+}
+
+impl ::std::fmt::Debug for CrateNum {
+    fn fmt(&self, fmt: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            CrateNum::Index(id) => write!(fmt, "crate{}", id.private),
+            CrateNum::ReservedForIncrCompCache => write!(fmt, "crate for decoding incr comp cache"),
+        }
     }
 }
 
