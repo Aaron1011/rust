@@ -1,3 +1,5 @@
+use crate::HashStableContext;
+use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::AtomicRef;
 use rustc_index::vec::Idx;
 use rustc_serialize::{Decoder, Encoder};
@@ -207,3 +209,9 @@ impl fmt::Debug for LocalDefId {
 
 impl rustc_serialize::UseSpecializedEncodable for LocalDefId {}
 impl rustc_serialize::UseSpecializedDecodable for LocalDefId {}
+
+impl<CTX: HashStableContext> HashStable<CTX> for DefId {
+    fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
+        hcx.hash_def_id(*self, hasher)
+    }
+}

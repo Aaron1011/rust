@@ -1653,9 +1653,3 @@ where
         }
     }
 }
-
-impl<CTX: HashStableContext> HashStable<CTX> for DefId {
-    fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
-        hcx.hash_def_id(*self, hasher)
-    }
-}
