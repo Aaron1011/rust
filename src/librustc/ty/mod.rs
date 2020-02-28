@@ -84,7 +84,6 @@ pub use self::context::{
     CtxtInterners, GeneratorInteriorTypeCause, GlobalCtxt, Lift, TypeckTables,
 };
 
-pub use self::instance::RESOLVE_INSTANCE;
 pub use self::instance::{Instance, InstanceDef};
 
 pub use self::trait_def::TraitDef;
