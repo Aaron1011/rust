@@ -278,7 +278,7 @@ impl<'tcx> Instance<'tcx> {
         def_id: DefId,
         substs: SubstsRef<'tcx>,
     ) -> Option<Instance<'tcx>> {
-        tcx.resolve_instance((param_env, def_id, substs))
+        tcx.resolve_instance((tcx.erase_regions(&param_env), def_id, tcx.erase_regions(&substs)))
     }
 
     pub fn resolve_for_fn_ptr(
