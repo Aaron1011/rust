@@ -590,6 +590,7 @@ impl Printer<'tcx> for SymbolMangler<'tcx> {
             // These should never show up as `path_append` arguments.
             DefPathData::CrateRoot
             | DefPathData::Misc
+            | DefPathData::MacroInvoc
             | DefPathData::Impl
             | DefPathData::MacroNs(_)
             | DefPathData::LifetimeNs(_) => {

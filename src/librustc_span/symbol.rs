@@ -285,6 +285,7 @@ symbols! {
         double_braced_constructor: "{{constructor}}",
         double_braced_constant: "{{constant}}",
         double_braced_opaque: "{{opaque}}",
+        double_braced_macro_invoc: "{{macro_invoc}}",
         dropck_eyepatch,
         dropck_parametricity,
         drop_types_in_const,

@@ -18,15 +18,18 @@ use rustc_expand::compile_declarative_macro;
 use rustc_expand::expand::{AstFragment, AstFragmentKind, Invocation, InvocationKind};
 use rustc_feature::is_builtin_attr_name;
 use rustc_hir::def::{self, DefKind, NonMacroAttrKind};
-use rustc_hir::def_id;
+use rustc_hir::def_id::{self, DefIndex};
 use rustc_session::lint::builtin::UNUSED_MACROS;
 use rustc_session::parse::feature_err;
 use rustc_session::Session;
+use rustc_span::def_id::LocalDefId;
 use rustc_span::edition::Edition;
 use rustc_span::hygiene::{self, ExpnData, ExpnId, ExpnKind};
 use rustc_span::symbol::{kw, sym, Symbol};
 use rustc_span::{Span, DUMMY_SP};
 
+use rustc::hir::map::DefPathData;
+use rustc_ast::node_id::DUMMY_NODE_ID;
 use rustc_data_structures::sync::Lrc;
 use rustc_span::hygiene::{AstPass, MacroKind};
 use std::{mem, ptr};
@@ -146,6 +149,10 @@ impl<'a> base::Resolver for Resolver<'a> {
         self.next_node_id()
     }
 
+    fn create_macro_invoc_def(&mut self) -> LocalDefId {
+        self.definitions.create_macro_invoc_def()
+    }
+
     fn resolve_dollar_crates(&mut self) {
         hygiene::update_dollar_crate_names(|ctxt| {
             let ident = Ident::new(kw::DollarCrate, DUMMY_SP.with_ctxt(ctxt));
@@ -182,12 +189,15 @@ impl<'a> base::Resolver for Resolver<'a> {
         features: &[Symbol],
         parent_module_id: Option<NodeId>,
     ) -> ExpnId {
-        let expn_id = ExpnId::fresh(Some(ExpnData::allow_unstable(
-            ExpnKind::AstPass(pass),
-            call_site,
-            self.session.edition(),
-            features.into(),
-        )));
+        let expn_id = ExpnId::fresh(
+            Some(ExpnData::allow_unstable(
+                ExpnKind::AstPass(pass),
+                call_site,
+                self.session.edition(),
+                features.into(),
+            )),
+            self.definitions.create_macro_invoc_def().local_def_index,
+        );
 
         let parent_scope = if let Some(module_id) = parent_module_id {
             let parent_def_id = self.definitions.local_def_id(module_id);

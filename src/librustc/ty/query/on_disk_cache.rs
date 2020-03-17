@@ -18,10 +18,15 @@ use rustc_serialize::{
     UseSpecializedDecodable, UseSpecializedEncodable,
 };
 use rustc_session::{CrateDisambiguator, Session};
-use rustc_span::hygiene::{ExpnId, SyntaxContext};
+use rustc_span::hygiene::{
+    CrossCrateContext, ExpnId, HasSameCrateContext, SameCrateContext, SyntaxContext,
+    SyntaxContextData,
+};
 use rustc_span::source_map::{SourceMap, StableSourceFileId};
-use rustc_span::{BytePos, SourceFile, Span, DUMMY_SP};
+use rustc_span::{BytePos, ExpnData, SourceFile, Span, DUMMY_SP};
+use std::borrow::Cow;
 use std::mem;
+use std::rc::Rc;
 
 const TAG_FILE_FOOTER: u128 = 0xC0FFEE_C0FFEE_C0FFEE_C0FFEE_C0FFEE;
 
@@ -34,6 +39,10 @@ const TAG_EXPN_DATA_INLINE: u8 = 2;
 
 const TAG_VALID_SPAN: u8 = 0;
 const TAG_INVALID_SPAN: u8 = 1;
+
+const TAG_SYNTAX_CONTEXT: u8 = 0;
+const TAG_EXPN_DATA: u8 = 1;
+const TAG_EXPN_DATA_MAP: u8 = 2;
 
 /// Provides an interface to incremental compilation data cached from the
 /// previous compilation session. This data will eventually include the results
@@ -66,9 +75,17 @@ pub struct OnDiskCache<'sess> {
     prev_diagnostics_index: FxHashMap<SerializedDepNodeIndex, AbsoluteBytePos>,
 
     alloc_decoding_state: AllocDecodingState,
+
+    syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
+    expn_data_pos: Option<AbsoluteBytePos>,
+    expn_data: Lock<FxHashMap<DefId, AbsoluteBytePos>>,
+    hygiene_context: CrossCrateContext,
+
+    //hygiene_index: AbsoluteBytePos,
+    init_cache: Lock<bool>,
 }
 
-// This type is used only for (de-)serialization.
+// This type is used only for serialization and deserialization.
 #[derive(RustcEncodable, RustcDecodable)]
 struct Footer {
     file_index_to_stable_id: FxHashMap<SourceFileIndex, StableSourceFileId>,
@@ -77,6 +94,8 @@ struct Footer {
     diagnostics_index: EncodedQueryResultIndex,
     // The location of all allocations.
     interpret_alloc_index: Vec<u32>,
+    syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
+    expn_data: AbsoluteBytePos,
 }
 
 type EncodedQueryResultIndex = Vec<(SerializedDepNodeIndex, AbsoluteBytePos)>;
@@ -118,6 +137,7 @@ impl<'sess> OnDiskCache<'sess> {
 
             // Decode the file footer, which contains all the lookup tables, etc.
             decoder.set_position(footer_pos);
+
             decode_tagged(&mut decoder, TAG_FILE_FOOTER)
                 .expect("error while trying to decode footer position")
         };
@@ -134,7 +154,35 @@ impl<'sess> OnDiskCache<'sess> {
             prev_diagnostics_index: footer.diagnostics_index.into_iter().collect(),
             synthetic_syntax_contexts: Default::default(),
             alloc_decoding_state: AllocDecodingState::new(footer.interpret_alloc_index),
+            //hygiene_index: footer.hygiene_index,
+            init_cache: Lock::new(false),
+            syntax_contexts: footer.syntax_contexts,
+            expn_data_pos: Some(footer.expn_data),
+            expn_data: Lock::new(Default::default()),
+            hygiene_context: CrossCrateContext::from_global_hygiene(),
         }
+    }
+
+    pub fn init<'tcx>(&self, tcx: TyCtxt<'tcx>) {
+        let mut lock = self.init_cache.lock();
+        if *lock {
+            panic!("OnDiskCache already initialed!")
+        }
+        *lock = true;
+
+        if let Some(expn_data_pos) = self.expn_data_pos.as_ref() {
+            let expn_data = self.with_decoder(tcx, self.expn_data_pos.unwrap(), |decoder| {
+                let expn_data: FxHashMap<DefId, AbsoluteBytePos> =
+                    decode_tagged(decoder, TAG_EXPN_DATA_MAP).unwrap();
+                expn_data
+            });
+
+            *self.expn_data.lock() = expn_data;
+        } else {
+        }
+
+        /*self.with_decoder(tcx, self.hygiene_index, |d| CrossCrateHygieneData::decode(d))
+        .expect("Failed to decode hygiene data!");*/
     }
 
     pub fn new_empty(source_map: &'sess SourceMap) -> Self {
@@ -150,6 +198,13 @@ impl<'sess> OnDiskCache<'sess> {
             prev_diagnostics_index: Default::default(),
             synthetic_syntax_contexts: Default::default(),
             alloc_decoding_state: AllocDecodingState::new(Vec::new()),
+            //hygiene_index: AbsoluteBytePos(0),
+            // Nothing to initialize
+            init_cache: Lock::new(false),
+            syntax_contexts: FxHashMap::default(),
+            expn_data: Lock::new(Default::default()),
+            expn_data_pos: None,
+            hygiene_context: CrossCrateContext::from_global_hygiene(),
         }
     }
 
@@ -234,6 +289,13 @@ impl<'sess> OnDiskCache<'sess> {
                 })
                 .collect::<Result<_, _>>()?;
 
+            // Encode hygiene data
+            /*let hygiene_index = {
+                let pos = AbsoluteBytePos::new(encoder.position());
+                CrossCrateHygieneData.encode(&mut encoder)?;
+                pos
+            };*/
+
             let interpret_alloc_index = {
                 let mut interpret_alloc_index = Vec::new();
                 let mut n = 0;
@@ -266,7 +328,27 @@ impl<'sess> OnDiskCache<'sess> {
                 })
                 .collect();
 
-            // Encode the file footer.
+            let mut syntax_contexts = FxHashMap::default();
+            let mut expn_data = FxHashMap::default();
+
+            rustc_span::hygiene::for_all_data(|(index, data)| {
+                let pos = AbsoluteBytePos::new(encoder.position());
+                encoder.encode_tagged(TAG_SYNTAX_CONTEXT, data)?;
+                syntax_contexts.insert(index, pos);
+                Ok(())
+            })?;
+
+            rustc_span::hygiene::for_all_expn_data(|(index, data)| {
+                let pos = AbsoluteBytePos::new(encoder.position());
+                encoder.encode_tagged(TAG_EXPN_DATA, data)?;
+                expn_data.insert(data.def_id.unwrap(), pos);
+                Ok(())
+            })?;
+
+            let expn_data_pos = AbsoluteBytePos::new(encoder.position());
+            encoder.encode_tagged(TAG_EXPN_DATA_MAP, &expn_data)?;
+
+            // `Encode the file footer.
             let footer_pos = encoder.position() as u64;
             encoder.encode_tagged(
                 TAG_FILE_FOOTER,
@@ -276,6 +358,8 @@ impl<'sess> OnDiskCache<'sess> {
                     query_result_index,
                     diagnostics_index,
                     interpret_alloc_index,
+                    syntax_contexts,
+                    expn_data: expn_data_pos,
                 },
             )?;
 
@@ -369,6 +453,21 @@ impl<'sess> OnDiskCache<'sess> {
     {
         let pos = index.get(&dep_node_index).cloned()?;
 
+        self.with_decoder(tcx, pos, |decoder| match decode_tagged(decoder, dep_node_index) {
+            Ok(v) => Some(v),
+            Err(e) => bug!("could not decode cached {}: {}", debug_tag, e),
+        })
+    }
+
+    fn with_decoder<'tcx, T, F: FnOnce(&mut CacheDecoder<'sess, 'tcx>) -> T>(
+        &'sess self,
+        tcx: TyCtxt<'tcx>,
+        pos: AbsoluteBytePos,
+        f: F,
+    ) -> T
+    where
+        T: Decodable,
+    {
         // Initialize `cnum_map` using the value from the thread that finishes the closure first.
         self.cnum_map.init_nonlocking_same(|| Self::compute_cnum_map(tcx, &self.prev_cnums[..]));
 
@@ -381,12 +480,11 @@ impl<'sess> OnDiskCache<'sess> {
             file_index_to_file: &self.file_index_to_file,
             file_index_to_stable_id: &self.file_index_to_stable_id,
             alloc_decoding_session: self.alloc_decoding_state.new_decoding_session(),
+            syntax_contexts: &self.syntax_contexts,
+            expn_data: &self.expn_data,
+            hygiene_context: &self.hygiene_context,
         };
-
-        match decode_tagged(&mut decoder, dep_node_index) {
-            Ok(v) => Some(v),
-            Err(e) => bug!("could not decode cached {}: {}", debug_tag, e),
-        }
+        f(&mut decoder)
     }
 
     // This function builds mapping from previous-session-`CrateNum` to
@@ -436,6 +534,52 @@ struct CacheDecoder<'a, 'tcx> {
     file_index_to_file: &'a Lock<FxHashMap<SourceFileIndex, Lrc<SourceFile>>>,
     file_index_to_stable_id: &'a FxHashMap<SourceFileIndex, StableSourceFileId>,
     alloc_decoding_session: AllocDecodingSession<'a>,
+    syntax_contexts: &'a FxHashMap<u32, AbsoluteBytePos>,
+    expn_data: &'a Lock<FxHashMap<DefId, AbsoluteBytePos>>,
+    hygiene_context: &'a CrossCrateContext,
+}
+
+/*impl<'a, 'tcx> HasSameCrateContext for CacheDecoder<'a, 'tcx> {
+    fn get_same_crate_context(&self) -> &SameCrateContext {
+        &self.hygiene_context
+    }
+}*/
+
+struct FooterDecoder<'a, 'tcx> {
+    tcx: &'tcx (),
+    opaque: &'a mut opaque::Decoder<'a>,
+}
+
+impl<'a, 'tcx> Decoder for FooterDecoder<'a, 'tcx> {
+    type Error = String;
+
+    __impl_decoder_methods! {
+        read_nil -> ();
+
+        read_u128 -> u128;
+        read_u64 -> u64;
+        read_u32 -> u32;
+        read_u16 -> u16;
+        read_u8 -> u8;
+        read_usize -> usize;
+
+        read_i128 -> i128;
+        read_i64 -> i64;
+        read_i32 -> i32;
+        read_i16 -> i16;
+        read_i8 -> i8;
+        read_isize -> isize;
+
+        read_bool -> bool;
+        read_f64 -> f64;
+        read_f32 -> f32;
+        read_char -> char;
+        read_str -> Cow<'_, str>;
+    }
+
+    fn error(&mut self, err: &str) -> Self::Error {
+        self.opaque.error(err)
+    }
 }
 
 impl<'a, 'tcx> CacheDecoder<'a, 'tcx> {
@@ -471,6 +615,12 @@ impl<'a> DecoderWithPosition for opaque::Decoder<'a> {
 }
 
 impl<'a, 'tcx> DecoderWithPosition for CacheDecoder<'a, 'tcx> {
+    fn position(&self) -> usize {
+        self.opaque.position()
+    }
+}
+
+impl<'a, 'tcx> DecoderWithPosition for FooterDecoder<'a, 'tcx> {
     fn position(&self) -> usize {
         self.opaque.position()
     }
@@ -555,6 +705,65 @@ impl<'a, 'tcx> TyDecoder<'tcx> for CacheDecoder<'a, 'tcx> {
 }
 
 implement_ty_decoder!(CacheDecoder<'a, 'tcx>);
+//implement_ty_decoder!(__footer_decoder_impl, FooterDecoder<'a, 'tcx>);
+
+/*impl<'a, 'tcx, E> SpecializedEncoder<SyntaxContext> for CacheEncoder<'a, 'tcx, E>
+where
+    E: 'a + TyEncoder,
+{
+    fn specialized_encode(&mut self, ctxt: &SyntaxContext) -> Result<(), Self::Error> {
+        /*let mut hasher = StableHasher::new();
+        let mut hcx = self.tcx.create_stable_hashing_context();
+        ctxt.hash_stable(&mut hcx, &mut hasher);
+        let fingerprint: Fingerprint = */
+        /*rustc_span::hygiene::incr_comp_encode_syntax_context(
+            *ctxt,
+            &mut self.tcx.create_stable_hashing_context(),
+            self,
+        )*/
+        //rustc_span::hygiene::cross_crate_encode_syntax_context(*ctxt, self)
+    }
+}*/
+
+impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for CacheDecoder<'a, 'tcx> {
+    fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
+        let syntax_contexts = self.syntax_contexts;
+        rustc_span::hygiene::cross_crate_decode_syntax_context(
+            self,
+            self.hygiene_context,
+            |this, id| {
+                let pos = syntax_contexts.get(&id).unwrap();
+                this.with_position(pos.to_usize(), |decoder| {
+                    let data: SyntaxContextData = decode_tagged(decoder, TAG_SYNTAX_CONTEXT)?;
+                    Ok(data)
+                })
+            },
+        )
+        //let ctxt = self.hygiene_context.clone();
+        //rustc_span::hygiene::incr_comp_decode_syntax_context_infallible(self, &ctxt.get())
+        //rustc_span::hygiene::cross_crate_decode_syntax_context(self, &self.hygiene_context.clone())
+        /*let raw_id = Su32::decode(self.opaque);
+
+        let syntax_context_remap = self.syntax_context_remap.lock();
+        match syntax_context_remap.entry(raw_id) {
+            Entry::Occupied(e) => *e.get(),
+            Entry::Vacant(e) => self.hy,
+        }*/
+    }
+}
+
+impl<'a, 'tcx> SpecializedDecoder<ExpnId> for CacheDecoder<'a, 'tcx> {
+    fn specialized_decode(&mut self) -> Result<ExpnId, Self::Error> {
+        let expn_data = self.expn_data;
+        rustc_span::hygiene::cross_crate_decode_expn_id(self, |this, def_id| {
+            let pos = { expn_data.lock().get(&def_id).copied().unwrap() };
+            this.with_position(pos.to_usize(), |decoder| {
+                let data: ExpnData = decode_tagged(decoder, TAG_EXPN_DATA)?;
+                Ok(data)
+            })
+        })
+    }
+}
 
 impl<'a, 'tcx> SpecializedDecoder<interpret::AllocId> for CacheDecoder<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<interpret::AllocId, Self::Error> {
@@ -577,12 +786,33 @@ impl<'a, 'tcx> SpecializedDecoder<Span> for CacheDecoder<'a, 'tcx> {
         let line_lo = usize::decode(self)?;
         let col_lo = BytePos::decode(self)?;
         let len = BytePos::decode(self)?;
+        let ctxt = SyntaxContext::decode(self)?;
 
         let file_lo = self.file_index_to_file(file_lo_index);
         let lo = file_lo.lines[line_lo - 1] + col_lo;
         let hi = lo + len;
 
-        let expn_data_tag = u8::decode(self)?;
+        Ok(Span::new(lo, hi, ctxt))
+
+        /*let ctxt_fingerprint: Fingerprint = Decodable::decode(self)?;
+        if let Some(ctxt) = self.hygiene_context.get().syntax_context_map.get(&ctxt_fingerprint) {
+            debug!(
+                "CacheDecoder::specialized_decode_span: deserialiezd fingerprint {:?} to ctxt {:?}",
+                ctxt_fingerprint, ctxt
+            );
+            Ok(Span::new(lo, hi, *ctxt))
+        } else {
+            debug!(
+                "CacheDecoder::specialized_decode_span: failed to deserialize fingerprint {:?}",
+                ctxt_fingerprint
+            );
+            Ok(DUMMY_SP)
+        }*/
+
+        //let ctxt = SyntaxContext::decode(self)?;
+        //Ok(Span::new(lo, hi, ctxt))
+
+        /*let expn_data_tag = u8::decode(self)?;
 
         // FIXME(mw): This method does not restore `ExpnData::parent` or
         // `SyntaxContextData::prev_ctxt` or `SyntaxContextData::opaque`. These things
@@ -618,7 +848,7 @@ impl<'a, 'tcx> SpecializedDecoder<Span> for CacheDecoder<'a, 'tcx> {
                 }
             }
             _ => unreachable!(),
-        })
+        })*/
     }
 }
 
@@ -639,17 +869,21 @@ impl<'a, 'tcx> SpecializedDecoder<DefIndex> for CacheDecoder<'a, 'tcx> {
     }
 }
 
+fn decode_def_id_from_hash<D: Decoder>(d: &mut D, tcx: TyCtxt<'_>) -> Result<DefId, D::Error> {
+    // Load the `DefPathHash` which is was we encoded the `DefId` as.
+    let def_path_hash = DefPathHash::decode(d)?;
+
+    // Using the `DefPathHash`, we can lookup the new `DefId`.
+    Ok(tcx.def_path_hash_to_def_id.as_ref().unwrap()[&def_path_hash])
+}
+
 // Both the `CrateNum` and the `DefIndex` of a `DefId` can change in between two
 // compilation sessions. We use the `DefPathHash`, which is stable across
 // sessions, to map the old `DefId` to the new one.
 impl<'a, 'tcx> SpecializedDecoder<DefId> for CacheDecoder<'a, 'tcx> {
     #[inline]
     fn specialized_decode(&mut self) -> Result<DefId, Self::Error> {
-        // Load the `DefPathHash` which is was we encoded the `DefId` as.
-        let def_path_hash = DefPathHash::decode(self)?;
-
-        // Using the `DefPathHash`, we can lookup the new `DefId`.
-        Ok(self.tcx().def_path_hash_to_def_id.as_ref().unwrap()[&def_path_hash])
+        decode_def_id_from_hash(self, self.tcx())
     }
 }
 
@@ -776,8 +1010,10 @@ where
         line_lo.encode(self)?;
         col_lo.encode(self)?;
         len.encode(self)?;
+        span_data.ctxt.encode(self)?;
+        Ok(())
 
-        if span_data.ctxt == SyntaxContext::root() {
+        /*if span_data.ctxt == SyntaxContext::root() {
             TAG_NO_EXPN_DATA.encode(self)
         } else {
             let (expn_id, transparency, expn_data) = span_data.ctxt.outer_mark_with_data();
@@ -790,7 +1026,7 @@ where
                 self.expn_data_shorthands.insert(expn_id, pos);
                 (expn_data, transparency).encode(self)
             }
-        }
+        }*/
     }
 }
 

@@ -8,6 +8,7 @@
 #![feature(proc_macro_internals)]
 #![feature(specialization)]
 #![feature(stmt_expr_attributes)]
+#![feature(never_type)]
 #![recursion_limit = "256"]
 
 extern crate libc;

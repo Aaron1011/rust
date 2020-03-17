@@ -1,4 +1,4 @@
-use crate::rmeta::table::FixedSizeEncoding;
+use crate::rmeta::table::{FixedSizeEncoding, TableBuilder};
 use crate::rmeta::*;
 
 use log::{debug, trace};
@@ -30,8 +30,8 @@ use rustc_index::vec::Idx;
 use rustc_serialize::{opaque, Encodable, Encoder, SpecializedEncoder};
 use rustc_session::config::{self, CrateType};
 use rustc_span::source_map::Spanned;
-use rustc_span::symbol::{kw, sym, Symbol};
-use rustc_span::{self, ExternalSource, FileName, SourceFile, Span};
+use rustc_span::symbol::{kw, sym, Ident, Symbol};
+use rustc_span::{self, ExternalSource, FileName, SourceFile, Span, SyntaxContext};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -208,15 +208,16 @@ impl<'tcx> SpecializedEncoder<Span> for EncodeContext<'tcx> {
         let len = hi - lo;
         len.encode(self)?;
 
+        span.ctxt.encode(self)?;
+
         if tag == TAG_VALID_SPAN_FOREIGN {
             // This needs to be two lines to avoid holding the `self.source_file_cache`
             // while calling `cnum.encode(self)`
             let cnum = self.source_file_cache.cnum;
             cnum.encode(self)?;
         }
-        Ok(())
 
-        // Don't encode the expansion context.
+        Ok(())
     }
 }
 
@@ -417,8 +418,13 @@ impl<'tcx> EncodeContext<'tcx> {
     fn encode_crate_root(&mut self) -> Lazy<CrateRoot<'tcx>> {
         let is_proc_macro = self.tcx.sess.crate_types.borrow().contains(&CrateType::ProcMacro);
 
+        // Encode the hygiene data
         let mut i = self.position();
+        let (syntax_contexts, expn_data) = self.encode_hygiene();
+        let hygiene_bytes = self.position() - i;
 
+        // Encode the crate deps
+        i = self.position();
         let crate_deps = self.encode_crate_deps();
         let dylib_dependency_formats = self.encode_dylib_dependency_formats();
         let dep_bytes = self.position() - i;
@@ -501,6 +507,16 @@ impl<'tcx> EncodeContext<'tcx> {
         let proc_macro_data = self.encode_proc_macros();
         let proc_macro_data_bytes = self.position() - i;
 
+        /* // Encode the syntax context data
+        i = self.position();
+        let syntax_contexts = self.syntax_context_table.encode(&mut self.opaque);
+        let syntax_contexts_bytes = self.position() - i;*/
+
+        // Encode the expansion data
+        /*i = self.position();
+        let expn_data = self.expn_data_table.encode(&mut self.opaque);
+        let expn_data_bytes = self.position() - i;*/
+
         // Encode exported symbols info. This is prefetched in `encode_metadata` so we encode
         // this last to give the prefetching as much time as possible to complete.
         i = self.position();
@@ -557,6 +573,8 @@ impl<'tcx> EncodeContext<'tcx> {
             exported_symbols,
             interpret_alloc_index,
             per_def,
+            syntax_contexts,
+            expn_data,
         });
 
         let total_bytes = self.position();
@@ -582,6 +600,7 @@ impl<'tcx> EncodeContext<'tcx> {
             println!(" proc-macro-data-bytes: {}", proc_macro_data_bytes);
             println!("            item bytes: {}", item_bytes);
             println!("   per-def table bytes: {}", per_def_bytes);
+            println!("         hygiene bytes: {}", hygiene_bytes);
             println!("            zero bytes: {}", zero_bytes);
             println!("           total bytes: {}", total_bytes);
         }
@@ -1355,6 +1374,28 @@ impl EncodeContext<'tcx> {
         self.lazy(foreign_modules.iter().cloned())
     }
 
+    fn encode_hygiene(&mut self) -> (SyntaxContextTable, ExpnDataTable) {
+        let mut syntax_contexts: TableBuilder<_, _> = Default::default();
+        let mut expn_data_table: TableBuilder<_, _> = Default::default();
+        rustc_span::hygiene::for_all_data(|(index, data)| {
+            syntax_contexts.set(index, self.lazy(data));
+            Ok::<(), !>(())
+        })
+        .unwrap();
+        rustc_span::hygiene::for_all_expn_data(|(index, expn_data)| {
+            let def_id = expn_data.def_id.unwrap();
+            // Don't encode the ExpnData for ExpnIds from foreign crates.
+            // The crate that defines the ExpnId will store the ExpnData,
+            // and the metadata decoder will look it from from that crate via the CStore
+            if def_id.krate == LOCAL_CRATE {
+                expn_data_table.set(def_id.index, self.lazy(expn_data));
+            }
+            Ok::<(), !>(())
+        })
+        .unwrap();
+        (syntax_contexts.encode(&mut self.opaque), expn_data_table.encode(&mut self.opaque))
+    }
+
     fn encode_proc_macros(&mut self) -> Option<Lazy<[DefIndex]>> {
         let is_proc_macro = self.tcx.sess.crate_types.borrow().contains(&CrateType::ProcMacro);
         if is_proc_macro {
@@ -1868,3 +1909,15 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
 
     EncodedMetadata { raw_data: result }
 }
+
+impl<'tcx> SpecializedEncoder<CrossCrateHygieneData> for EncodeContext<'tcx> {
+    fn specialized_encode(&mut self, _: &CrossCrateHygieneData) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/*impl<'tcx> SpecializedEncoder<SyntaxContext> for EncodeContext<'tcx> {
+    fn specialized_encode(&mut self, ctxt: &SyntaxContext) -> Result<(), Self::Error> {
+        rustc_span::hygiene::cross_crate_encode_syntax_context(*ctxt, self)
+    }
+}*/
