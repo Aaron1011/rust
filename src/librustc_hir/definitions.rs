@@ -11,12 +11,13 @@ use crate::hir_id::DUMMY_HIR_ID;
 
 use rustc_ast::ast;
 use rustc_ast::crate_disambiguator::CrateDisambiguator;
+use rustc_ast::node_id::DUMMY_NODE_ID;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stable_hasher::StableHasher;
 use rustc_index::vec::IndexVec;
 use rustc_span::hygiene::ExpnId;
 use rustc_span::symbol::{sym, Symbol};
-use rustc_span::Span;
+use rustc_span::{Span, DUMMY_SP};
 
 use log::debug;
 use std::fmt::Write;
@@ -100,6 +101,7 @@ pub struct Definitions {
     /// When collecting definitions from an AST fragment produced by a macro invocation `ExpnId`
     /// we know what parent node that fragment should be attached to thanks to this table.
     invocation_parents: FxHashMap<ExpnId, LocalDefId>,
+    invocation_def_indices: FxHashMap<ExpnId, DefIndex>,
     /// Indices of unnamed struct or variant fields with unresolved attributes.
     placeholder_field_indices: FxHashMap<ast::NodeId, usize>,
 }
@@ -267,6 +269,7 @@ pub enum DefPathData {
     CrateRoot,
     // Catch-all for random `DefId` things like `DUMMY_NODE_ID`.
     Misc,
+    MacroInvoc,
 
     // Different kinds of items and item-like things:
     /// An impl.
@@ -407,6 +410,16 @@ impl Definitions {
         root
     }
 
+    pub fn create_macro_invoc_def(&mut self) -> LocalDefId {
+        self.create_def_with_parent(
+            LocalDefId { local_def_index: CRATE_DEF_INDEX },
+            DUMMY_NODE_ID,
+            DefPathData::MacroInvoc,
+            ExpnId::root(),
+            DUMMY_SP,
+        )
+    }
+
     /// Adds a definition with a parent definition.
     pub fn create_def_with_parent(
         &mut self,
@@ -509,6 +522,11 @@ impl Definitions {
         assert!(old_parent.is_none(), "parent `LocalDefId` is reset for an invocation");
     }
 
+    pub fn set_invocation_def_index(&mut self, invoc_id: ExpnId, id: DefIndex) {
+        let old_index = self.invocation_def_indices.insert(invoc_id, id);
+        assert!(old_index.is_none(), "1DefIndex1 is reset for an invocation!");
+    }
+
     pub fn placeholder_field_index(&self, node_id: ast::NodeId) -> usize {
         self.placeholder_field_indices[&node_id]
     }
@@ -525,7 +543,9 @@ impl DefPathData {
         match *self {
             TypeNs(name) | ValueNs(name) | MacroNs(name) | LifetimeNs(name) => Some(name),
 
-            Impl | CrateRoot | Misc | ClosureExpr | Ctor | AnonConst | ImplTrait => None,
+            MacroInvoc | Impl | CrateRoot | Misc | ClosureExpr | Ctor | AnonConst | ImplTrait => {
+                None
+            }
         }
     }
 
@@ -541,6 +561,7 @@ impl DefPathData {
             Ctor => sym::double_braced_constructor,
             AnonConst => sym::double_braced_constant,
             ImplTrait => sym::double_braced_opaque,
+            MacroInvoc => sym::double_braced_macro_invoc,
         }
     }
 

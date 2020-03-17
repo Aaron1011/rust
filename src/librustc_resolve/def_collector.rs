@@ -4,6 +4,7 @@ use rustc_ast::token::{self, Token};
 use rustc_ast::visit::{self, FnKind};
 use rustc_expand::expand::AstFragment;
 use rustc_hir::def_id::LocalDefId;
+use rustc_hir::def_id::{DefId, DefIndex, LOCAL_CRATE};
 use rustc_hir::definitions::*;
 use rustc_span::hygiene::ExpnId;
 use rustc_span::symbol::{kw, sym};
@@ -57,7 +58,11 @@ impl<'a> DefCollector<'a> {
     }
 
     fn visit_macro_invoc(&mut self, id: NodeId) {
-        self.definitions.set_invocation_parent(id.placeholder_to_expn_id(), self.parent_def);
+        let expn_id = id.placeholder_to_expn_id();
+        self.definitions.set_invocation_parent(expn_id, self.parent_def);
+        //let index = self.create_def(DUMMY_NODE_ID, DefPathData::MacroInvoc, DUMMY_SP);
+        //expn_id.set_def_id(DefId { krate: LOCAL_CRATE, index });
+        //self.definitions.set_invocation_def_index(index);
     }
 }
 

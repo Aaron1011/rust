@@ -1,6 +1,6 @@
 // Decoding metadata from a single crate's metadata
 
-use crate::creader::CrateMetadataRef;
+use crate::creader::{CStore, CrateMetadataRef};
 use crate::rmeta::table::{FixedSizeEncoding, Table};
 use crate::rmeta::*;
 
@@ -22,28 +22,31 @@ use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::svh::Svh;
 use rustc_data_structures::sync::{AtomicCell, Lock, LockGuard, Lrc, Once};
-use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
-use rustc_expand::proc_macro::{AttrProcMacro, BangProcMacro, ProcMacroDerive};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorKind, CtorOf, DefKind, Res};
 use rustc_hir::def_id::{CrateNum, DefId, DefIndex, LocalDefId, CRATE_DEF_INDEX, LOCAL_CRATE};
 use rustc_hir::definitions::DefPathTable;
 use rustc_hir::definitions::{DefKey, DefPath, DefPathData, DefPathHash};
 use rustc_index::vec::{Idx, IndexVec};
-use rustc_serialize::{opaque, Decodable, Decoder, SpecializedDecoder};
 use rustc_session::Session;
-use rustc_span::source_map::{self, respan, Spanned};
-use rustc_span::symbol::{sym, Symbol};
-use rustc_span::{self, hygiene::MacroKind, BytePos, Pos, Span, DUMMY_SP};
 
 use log::debug;
-use proc_macro::bridge::client::ProcMacro;
 use std::io;
 use std::mem;
 use std::num::NonZeroUsize;
 use std::u32;
 
+use proc_macro::bridge::client::ProcMacro;
+use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
+use rustc_expand::proc_macro::{AttrProcMacro, BangProcMacro, ProcMacroDerive};
+use rustc_serialize::{opaque, Decodable, Decoder, SpecializedDecoder};
+use rustc_span::source_map::{self, respan, Spanned};
+use rustc_span::symbol::{sym, Symbol};
+use rustc_span::{self, hygiene::MacroKind, BytePos, ExpnId, Pos, Span, SyntaxContext, DUMMY_SP};
+
 pub use cstore_impl::{provide, provide_extern};
+use rustc_span::hygiene::CrossCrateContext;
+use std::rc::Rc;
 
 mod cstore_impl;
 
@@ -110,6 +113,8 @@ crate struct CrateMetadata {
     /// Information about the `extern crate` item or path that caused this crate to be loaded.
     /// If this is `None`, then the crate was injected (e.g., by the allocator).
     extern_crate: Lock<Option<ExternCrate>>,
+
+    hygiene_context: CrossCrateContext,
 }
 
 /// Holds information about a rustc_span::SourceFile imported from another crate.
@@ -390,6 +395,7 @@ impl<'a, 'tcx> SpecializedDecoder<Span> for DecodeContext<'a, 'tcx> {
 
         let lo = BytePos::decode(self)?;
         let len = BytePos::decode(self)?;
+        let ctxt = SyntaxContext::decode(self)?;
         let hi = lo + len;
 
         let sess = if let Some(sess) = self.sess {
@@ -505,7 +511,7 @@ impl<'a, 'tcx> SpecializedDecoder<Span> for DecodeContext<'a, 'tcx> {
         let hi =
             (hi + source_file.translated_source_file.start_pos) - source_file.original_start_pos;
 
-        Ok(Span::with_root_ctxt(lo, hi))
+        Ok(Span::new(lo, hi, ctxt))
     }
 }
 
@@ -1582,6 +1588,7 @@ impl CrateMetadata {
             private_dep,
             host_hash,
             extern_crate: Lock::new(None),
+            hygiene_context: CrossCrateContext::from_global_hygiene(),
         }
     }
 
@@ -1712,5 +1719,47 @@ fn macro_kind(raw: &ProcMacro) -> MacroKind {
         ProcMacro::CustomDerive { .. } => MacroKind::Derive,
         ProcMacro::Attr { .. } => MacroKind::Attr,
         ProcMacro::Bang { .. } => MacroKind::Bang,
+    }
+}
+
+/*impl<'a, 'tcx> SpecializedDecoder<CrossCrateHygieneData> for DecodeContext<'a, 'tcx> {
+    fn specialized_decode(&mut self) -> Result<CrossCrateHygieneData, Self::Error> {
+        rustc_span::hygiene::cross_crate_decode(self, &self.cdata().hygiene_context)?;
+        Ok(CrossCrateHygieneData)
+    }
+}*/
+
+impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for DecodeContext<'a, 'tcx> {
+    fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
+        let cdata = self.cdata();
+        let sess = self.sess.unwrap();
+        rustc_span::hygiene::cross_crate_decode_syntax_context(
+            self,
+            &cdata.hygiene_context,
+            |_, id| {
+                debug!("SpecializedDecoder<SyntaxContext>: decoding {}", id);
+                Ok(cdata.root.syntax_contexts.get(&cdata, id).unwrap().decode((&cdata, sess)))
+            },
+        )
+    }
+}
+
+impl<'a, 'tcx> SpecializedDecoder<ExpnId> for DecodeContext<'a, 'tcx> {
+    fn specialized_decode(&mut self) -> Result<ExpnId, Self::Error> {
+        let local_cdata = self.cdata();
+        let sess = self.sess.unwrap();
+        rustc_span::hygiene::cross_crate_decode_expn_id(self, |_, def_id| {
+            let crate_data = if def_id.krate == LOCAL_CRATE {
+                local_cdata
+            } else {
+                local_cdata.cstore.get_crate_data(def_id.krate)
+            };
+            Ok(crate_data
+                .root
+                .expn_data
+                .get(&crate_data, def_id.index)
+                .unwrap()
+                .decode((&crate_data, sess)))
+        })
     }
 }

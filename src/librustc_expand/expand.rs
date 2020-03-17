@@ -482,7 +482,10 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                     let mut derive_placeholders = Vec::with_capacity(derives.len());
                     invocations.reserve(derives.len());
                     for path in derives {
-                        let expn_id = ExpnId::fresh(None);
+                        let expn_id = ExpnId::fresh(
+                            None,
+                            self.cx.resolver.create_macro_invoc_def().local_def_index,
+                        );
                         derive_placeholders.push(NodeId::placeholder_from_expn_id(expn_id));
                         invocations.push((
                             Invocation {
@@ -554,7 +557,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
 
     /// Collects all macro invocations reachable at this time in this AST fragment, and replace
     /// them with "placeholders" - dummy macro invocations with specially crafted `NodeId`s.
-    /// Then call into resolver that builds a skeleton ("reduced graph") of the fragment and
+    /// Then call into resolver th  at builds a skeleton ("reduced graph") of the fragment and
     /// prepares data for resolving paths of macro invocations.
     fn collect_invocations(
         &mut self,
@@ -1025,7 +1028,8 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
             }),
             _ => None,
         };
-        let expn_id = ExpnId::fresh(expn_data);
+        let expn_id =
+            ExpnId::fresh(expn_data, self.cx.resolver.create_macro_invoc_def().local_def_index);
         let vis = kind.placeholder_visibility();
         self.invocations.push((
             Invocation {

@@ -36,6 +36,7 @@
 #![feature(specialization)]
 #![recursion_limit = "256"]
 
+use log::{debug, trace};
 use rustc_ast::ast;
 use rustc_ast::ast::*;
 use rustc_ast::attr;
@@ -63,9 +64,7 @@ use rustc_session::Session;
 use rustc_span::hygiene::ExpnId;
 use rustc_span::source_map::{respan, DesugaringKind, ExpnData, ExpnKind};
 use rustc_span::symbol::{kw, sym, Symbol};
-use rustc_span::Span;
-
-use log::{debug, trace};
+use rustc_span::{Span, DUMMY_SP};
 use smallvec::{smallvec, SmallVec};
 use std::collections::BTreeMap;
 use std::mem;
@@ -226,7 +225,7 @@ enum ImplTraitContext<'b, 'a> {
     /// We optionally store a `DefId` for the parent item here so we can look up necessary
     /// information later. It is `None` when no information about the context should be stored
     /// (e.g., for consts and statics).
-    OpaqueTy(Option<DefId> /* fn def-ID */, hir::OpaqueTyOrigin),
+    OpaqueTy(Option<LocalDefId> /* fn def-ID */, hir::OpaqueTyOrigin),
 
     /// `impl Trait` is not accepted in this position.
     Disallowed(ImplTraitPosition),
@@ -684,15 +683,33 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     /// Reuses the span but adds information like the kind of the desugaring and features that are
     /// allowed inside this span.
     fn mark_span_with_reason(
-        &self,
+        &mut self,
         reason: DesugaringKind,
         span: Span,
         allow_internal_unstable: Option<Lrc<[Symbol]>>,
     ) -> Span {
-        span.fresh_expansion(ExpnData {
-            allow_internal_unstable,
-            ..ExpnData::default(ExpnKind::Desugaring(reason), span, self.sess.edition())
-        })
+        let parent_def_id = self.current_hir_id_owner.last().unwrap().0;
+        let def_id = self.resolver.definitions().create_def_with_parent(
+            parent_def_id,
+            DUMMY_NODE_ID,
+            DefPathData::MacroInvoc,
+            ExpnId::root(),
+            DUMMY_SP,
+        );
+        /*let def_index = self.resolver.definitions().create_def_with_parent(
+            CRATE_DEF_INDEX,`
+            DUMMY_NODE_ID,
+            DefPathData::MacroInvoc,
+            ExpnId::root(),
+            DUMMY_SP,
+        );*/
+        span.fresh_expansion(
+            ExpnData {
+                allow_internal_unstable,
+                ..ExpnData::default(ExpnKind::Desugaring(reason), span, self.sess.edition())
+            },
+            def_id.local_def_index,
+        )
     }
 
     fn with_anonymous_lifetime_mode<R>(
@@ -1351,7 +1368,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     fn lower_opaque_impl_trait(
         &mut self,
         span: Span,
-        fn_def_id: Option<DefId>,
+        fn_def_id: Option<LocalDefId>,
         origin: hir::OpaqueTyOrigin,
         opaque_ty_node_id: NodeId,
         lower_bounds: impl FnOnce(&mut Self) -> hir::GenericBounds<'hir>,
@@ -1390,7 +1407,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     span,
                 },
                 bounds: hir_bounds,
-                impl_trait_fn: fn_def_id,
+                impl_trait_fn: fn_def_id.map(|d| d.to_def_id()),
                 origin,
             };
 
@@ -1623,10 +1640,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             self.lower_ty(
                 t,
                 if self.sess.features_untracked().impl_trait_in_bindings {
-                    ImplTraitContext::OpaqueTy(
-                        Some(parent_def_id.to_def_id()),
-                        hir::OpaqueTyOrigin::Misc,
-                    )
+                    ImplTraitContext::OpaqueTy(Some(parent_def_id), hir::OpaqueTyOrigin::Misc)
                 } else {
                     ImplTraitContext::Disallowed(ImplTraitPosition::Binding)
                 },
@@ -1676,7 +1690,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     fn lower_fn_decl(
         &mut self,
         decl: &FnDecl,
-        mut in_band_ty_params: Option<(DefId, &mut Vec<hir::GenericParam<'hir>>)>,
+        mut in_band_ty_params: Option<(LocalDefId, &mut Vec<hir::GenericParam<'hir>>)>,
         impl_trait_return_allow: bool,
         make_ret_async: Option<NodeId>,
     ) -> &'hir hir::FnDecl<'hir> {
@@ -1783,7 +1797,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     fn lower_async_fn_ret_ty(
         &mut self,
         output: &FnRetTy,
-        fn_def_id: DefId,
+        fn_def_id: LocalDefId,
         opaque_ty_node_id: NodeId,
     ) -> hir::FnRetTy<'hir> {
         debug!(
@@ -1897,7 +1911,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     span,
                 },
                 bounds: arena_vec![this; future_bound],
-                impl_trait_fn: Some(fn_def_id),
+                impl_trait_fn: Some(fn_def_id.to_def_id()),
                 origin: hir::OpaqueTyOrigin::AsyncFn,
             };
 
@@ -1957,7 +1971,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
     fn lower_async_fn_output_type_to_future_bound(
         &mut self,
         output: &FnRetTy,
-        fn_def_id: DefId,
+        fn_def_id: LocalDefId,
         span: Span,
     ) -> hir::GenericBound<'hir> {
         // Compute the `T` in `Future<Output = T>` from the return type.

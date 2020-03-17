@@ -42,10 +42,7 @@ macro_rules! fixed_size_encoding_byte_len_and_defaults {
             // but slicing `[u8]` with `i * N..` is optimized worse, due to the
             // possibility of `i * N` overflowing, than indexing `[[u8; N]]`.
             let b = unsafe {
-                std::slice::from_raw_parts(
-                    b.as_ptr() as *const [u8; BYTE_LEN],
-                    b.len() / BYTE_LEN,
-                )
+                std::slice::from_raw_parts(b.as_ptr() as *const [u8; BYTE_LEN], b.len() / BYTE_LEN)
             };
             b.get(i).map(|b| FixedSizeEncoding::from_bytes(b))
         }
@@ -61,7 +58,7 @@ macro_rules! fixed_size_encoding_byte_len_and_defaults {
             };
             self.write_to_bytes(&mut b[i]);
         }
-    }
+    };
 }
 
 impl FixedSizeEncoding for u32 {
@@ -158,7 +155,7 @@ impl<I: Idx, T> TableBuilder<I, T>
 where
     Option<T>: FixedSizeEncoding,
 {
-    pub(super) fn set(&mut self, i: I, value: T) {
+    pub(crate) fn set(&mut self, i: I, value: T) {
         // FIXME(eddyb) investigate more compact encodings for sparse tables.
         // On the PR @michaelwoerister mentioned:
         // > Space requirements could perhaps be optimized by using the HAMT `popcnt`
@@ -173,7 +170,7 @@ where
         Some(value).write_to_bytes_at(&mut self.bytes, i);
     }
 
-    pub(super) fn encode(&self, buf: &mut Encoder) -> Lazy<Table<I, T>> {
+    pub(crate) fn encode(&self, buf: &mut Encoder) -> Lazy<Table<I, T>> {
         let pos = buf.position();
         buf.emit_raw_bytes(&self.bytes);
         Lazy::from_position_and_meta(NonZeroUsize::new(pos as usize).unwrap(), self.bytes.len())

@@ -326,10 +326,15 @@ impl<'a> CrateLoader<'a> {
         let private_dep =
             self.sess.opts.externs.get(&name.as_str()).map(|e| e.is_private_dep).unwrap_or(false);
 
-        info!("register crate `{}` (private_dep = {})", crate_root.name(), private_dep);
-
         // Claim this crate number and cache it
         let cnum = self.cstore.alloc_new_crate_num();
+
+        info!(
+            "register crate `{}` (cnum = {}. private_dep = {})",
+            crate_root.name(),
+            cnum,
+            private_dep
+        );
 
         // Maintain a reference to the top most crate.
         // Stash paths for top-most crate locally if necessary.
@@ -358,21 +363,20 @@ impl<'a> CrateLoader<'a> {
             None
         };
 
-        self.cstore.set_crate_data(
+        let crate_metadata = CrateMetadata::new(
+            self.sess,
+            metadata,
+            crate_root,
+            raw_proc_macros,
             cnum,
-            CrateMetadata::new(
-                self.sess,
-                metadata,
-                crate_root,
-                raw_proc_macros,
-                cnum,
-                cnum_map,
-                dep_kind,
-                source,
-                private_dep,
-                host_hash,
-            ),
+            cnum_map,
+            dep_kind,
+            source,
+            private_dep,
+            host_hash,
         );
+
+        self.cstore.set_crate_data(cnum, crate_metadata);
 
         cnum
     }
@@ -557,7 +561,7 @@ impl<'a> CrateLoader<'a> {
         // The map from crate numbers in the crate we're resolving to local crate numbers.
         // We map 0 and all other holes in the map to our parent crate. The "additional"
         // self-dependencies should be harmless.
-        std::iter::once(krate)
+        let cnum_map = std::iter::once(krate)
             .chain(crate_root.decode_crate_deps(metadata).map(|dep| {
                 info!(
                     "resolving dep crate {} hash: `{}` extra filename: `{}`",
@@ -569,7 +573,10 @@ impl<'a> CrateLoader<'a> {
                 };
                 self.resolve_crate(dep.name, span, dep_kind, Some((root, &dep)))
             }))
-            .collect()
+            .collect();
+
+        debug!("resolve_crate_deps: cnum_map for {:?} is {:?}", krate, cnum_map);
+        cnum_map
     }
 
     fn dlsym_proc_macros(

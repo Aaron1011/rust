@@ -15,12 +15,12 @@ use rustc_hir as hir;
 use rustc_hir::def::CtorKind;
 use rustc_hir::def_id::{DefId, DefIndex};
 use rustc_index::vec::IndexVec;
-use rustc_serialize::opaque::Encoder;
+use rustc_serialize::{opaque::Encoder, UseSpecializedDecodable, UseSpecializedEncodable};
 use rustc_session::config::SymbolManglingVersion;
 use rustc_session::CrateDisambiguator;
 use rustc_span::edition::Edition;
 use rustc_span::symbol::Symbol;
-use rustc_span::{self, Span};
+use rustc_span::{self, ExpnData, Span, SyntaxContext};
 use rustc_target::spec::{PanicStrategy, TargetTriple};
 
 use std::marker::PhantomData;
@@ -28,6 +28,7 @@ use std::num::NonZeroUsize;
 
 pub use decoder::{provide, provide_extern};
 crate use decoder::{CrateMetadata, CrateNumMap, MetadataBlob};
+use rustc_span::hygiene::SyntaxContextData;
 
 mod decoder;
 mod encoder;
@@ -62,8 +63,17 @@ trait LazyMeta {
 impl<T> LazyMeta for T {
     type Meta = ();
 
-    fn min_size(_: ()) -> usize {
+    default fn min_size(_: ()) -> usize {
         assert_ne!(std::mem::size_of::<T>(), 0);
+        1
+    }
+}
+
+impl LazyMeta for CrossCrateHygieneData {
+    fn min_size(_: ()) -> usize {
+        // `CrossCrateHygieneData` is zero-sized, but the data we
+        // actually encode is always at least one byte (we encode multiple `Vec`s,
+        // which requires storing a length)
         1
     }
 }
@@ -90,7 +100,7 @@ impl<T> LazyMeta for [T] {
 /// use the forward distance from the previous `Lazy`.
 /// Distances start at 1, as 0-byte nodes are invalid.
 /// Also invalid are nodes being referred in a different
-/// order than they were encoded in.
+/// order than they were encoded in.s
 ///
 /// # Sequences (`Lazy<[T]>`)
 ///
@@ -168,6 +178,9 @@ macro_rules! Lazy {
     ($T:ty) => {Lazy<$T, ()>};
 }
 
+type SyntaxContextTable = Lazy<Table<u32, Lazy<SyntaxContextData>>>;
+type ExpnDataTable = Lazy<Table<DefIndex, Lazy<ExpnData>>>;
+
 #[derive(RustcEncodable, RustcDecodable)]
 crate struct CrateRoot<'tcx> {
     name: Symbol,
@@ -184,6 +197,8 @@ crate struct CrateRoot<'tcx> {
     proc_macro_decls_static: Option<DefIndex>,
     proc_macro_stability: Option<attr::Stability>,
 
+    syntax_contexts: SyntaxContextTable,
+    expn_data: ExpnDataTable,
     crate_deps: Lazy<[CrateDep]>,
     dylib_dependency_formats: Lazy<[Option<LinkagePreference>]>,
     lib_features: Lazy<[(Symbol, Option<Symbol>)]>,
@@ -406,6 +421,12 @@ struct GeneratorData<'tcx> {
 }
 
 // Tags used for encoding Spans:
+
+struct CrossCrateHygieneData;
+
+impl UseSpecializedEncodable for CrossCrateHygieneData {}
+impl UseSpecializedDecodable for CrossCrateHygieneData {}
+
 const TAG_VALID_SPAN_LOCAL: u8 = 0;
 const TAG_VALID_SPAN_FOREIGN: u8 = 1;
 const TAG_INVALID_SPAN: u8 = 2;

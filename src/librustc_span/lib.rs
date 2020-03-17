@@ -12,6 +12,7 @@
 #![feature(nll)]
 #![feature(optin_builtin_traits)]
 #![feature(specialization)]
+#![feature(option_expect_none)]
 
 use rustc_data_structures::AtomicRef;
 use rustc_macros::HashStable_Generic;
@@ -1545,8 +1546,8 @@ fn lookup_line(lines: &[BytePos], pos: BytePos) -> isize {
 /// This is a hack to allow using the `HashStable_Generic` derive macro
 /// instead of implementing everything in librustc.
 pub trait HashStableContext {
-    fn hash_spans(&self) -> bool;
     fn hash_def_id(&mut self, _: DefId, hasher: &mut StableHasher);
+    fn hash_spans(&self) -> bool;
     fn byte_pos_to_line_and_col(
         &mut self,
         byte: BytePos,
@@ -1569,8 +1570,6 @@ where
     fn hash_stable(&self, ctx: &mut CTX, hasher: &mut StableHasher) {
         const TAG_VALID_SPAN: u8 = 0;
         const TAG_INVALID_SPAN: u8 = 1;
-        const TAG_EXPANSION: u8 = 0;
-        const TAG_NO_EXPANSION: u8 = 1;
 
         if !ctx.hash_spans() {
             return;
@@ -1605,8 +1604,16 @@ where
         let len = ((span.hi - span.lo).0 as u64) << 32;
         let line_col_len = col | line | len;
         std::hash::Hash::hash(&line_col_len, hasher);
+        span.ctxt.hash_stable(ctx, hasher);
+    }
+}
 
-        if span.ctxt == SyntaxContext::root() {
+impl<CTX: HashStableContext> HashStable<CTX> for SyntaxContext {
+    fn hash_stable(&self, ctx: &mut CTX, hasher: &mut StableHasher) {
+        const TAG_EXPANSION: u8 = 0;
+        const TAG_NO_EXPANSION: u8 = 1;
+
+        if *self == SyntaxContext::root() {
             TAG_NO_EXPANSION.hash_stable(ctx, hasher);
         } else {
             TAG_EXPANSION.hash_stable(ctx, hasher);
@@ -1615,21 +1622,23 @@ where
             // times, we cache a stable hash of it and hash that instead of
             // recursing every time.
             thread_local! {
-                static CACHE: RefCell<FxHashMap<hygiene::ExpnId, u64>> = Default::default();
+                static CACHE: RefCell<FxHashMap<(hygiene::ExpnId, Transparency), u64>> = Default::default();
             }
 
             let sub_hash: u64 = CACHE.with(|cache| {
-                let expn_id = span.ctxt.outer_expn();
+                let (expn_id, transparency, _) = self.outer_mark_with_data();
 
-                if let Some(&sub_hash) = cache.borrow().get(&expn_id) {
+                if let Some(&sub_hash) = cache.borrow().get(&(expn_id, transparency)) {
                     return sub_hash;
                 }
 
                 let mut hasher = StableHasher::new();
-                expn_id.expn_data().hash_stable(ctx, &mut hasher);
+                expn_id.expn_data().def_id.expect("`DefId` not set!").hash_stable(ctx, &mut hasher);
+                transparency.hash_stable(ctx, &mut hasher);
+
                 let sub_hash: Fingerprint = hasher.finish();
                 let sub_hash = sub_hash.to_smaller_hash();
-                cache.borrow_mut().insert(expn_id, sub_hash);
+                cache.borrow_mut().insert((expn_id, transparency), sub_hash);
                 sub_hash
             });
 
