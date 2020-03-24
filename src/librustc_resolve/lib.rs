@@ -1934,10 +1934,17 @@ impl<'a> Resolver<'a> {
 
     fn macro_def_crate(&mut self, expn_id: ExpnId) -> CrateNum {
         debug!("macro_def_crate({:?})", expn_id);
-        let def_id = expn_id.def_id().unwrap();
-        if def_id.krate != LOCAL_CRATE {
+
+        let def_id = expn_id.def_id();
+
+        if def_id.is_none() {
+            debug!("macro_def_crate: missing defId, treating as local")
+        }
+
+        //.unwrap_or_else(|| panic!("Missing DefId for {:?} {:?}", expn_id, expn_id.expn_data()));
+        if def_id.map_or(false, |did| did.krate != LOCAL_CRATE) {
             debug!("macro_def_crate: foreign DefId {:?}", def_id);
-            return def_id.krate;
+            return def_id.unwrap().krate;
         }
         let module = self.macro_def_scope(expn_id);
         debug!("macro_def_crate: module {:?}", module);
