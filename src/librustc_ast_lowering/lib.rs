@@ -697,13 +697,15 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             DUMMY_SP,
         );
 
-        span.fresh_expansion(
-            ExpnData {
-                allow_internal_unstable,
-                ..ExpnData::default(ExpnKind::Desugaring(reason), span, self.sess.edition())
-            },
-            def_id.local_def_index,
-        )
+        span.fresh_expansion(ExpnData {
+            allow_internal_unstable,
+            ..ExpnData::default(
+                ExpnKind::Desugaring(reason),
+                span,
+                self.sess.edition(),
+                Some(def_id),
+            )
+        })
     }
 
     fn with_anonymous_lifetime_mode<R>(

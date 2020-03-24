@@ -182,15 +182,13 @@ impl<'a> base::Resolver for Resolver<'a> {
         features: &[Symbol],
         parent_module_id: Option<NodeId>,
     ) -> ExpnId {
-        let expn_id = ExpnId::fresh(
-            Some(ExpnData::allow_unstable(
-                ExpnKind::AstPass(pass),
-                call_site,
-                self.session.edition(),
-                features.into(),
-            )),
-            self.definitions.create_macro_invoc_def().local_def_index,
-        );
+        let expn_id = ExpnId::fresh(Some(ExpnData::allow_unstable(
+            ExpnKind::AstPass(pass),
+            call_site,
+            self.session.edition(),
+            features.into(),
+            None,
+        )));
 
         let parent_scope = if let Some(module_id) = parent_module_id {
             let parent_def_id = self.definitions.local_def_id(module_id);

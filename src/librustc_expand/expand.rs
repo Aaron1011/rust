@@ -482,10 +482,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                     let mut derive_placeholders = Vec::with_capacity(derives.len());
                     invocations.reserve(derives.len());
                     for path in derives {
-                        let expn_id = ExpnId::fresh(
-                            None,
-                            self.cx.resolver.create_macro_invoc_def().local_def_index,
-                        );
+                        let expn_id = ExpnId::fresh(None);
                         derive_placeholders.push(NodeId::placeholder_from_expn_id(expn_id));
                         invocations.push((
                             Invocation {
@@ -1024,12 +1021,12 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
                     ExpnKind::Macro(MacroKind::Attr, sym::derive),
                     item.span(),
                     self.cx.parse_sess.edition,
+                    None,
                 )
             }),
             _ => None,
         };
-        let expn_id =
-            ExpnId::fresh(expn_data, self.cx.resolver.create_macro_invoc_def().local_def_index);
+        let expn_id = ExpnId::fresh(expn_data);
         let vis = kind.placeholder_visibility();
         self.invocations.push((
             Invocation {
