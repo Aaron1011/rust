@@ -13,7 +13,6 @@ use rustc_data_structures::sync::{self, Lrc};
 use rustc_errors::{DiagnosticBuilder, ErrorReported};
 use rustc_parse::{self, parser, MACRO_ARGUMENTS};
 use rustc_session::parse::ParseSess;
-use rustc_span::def_id::LocalDefId;
 use rustc_span::edition::Edition;
 use rustc_span::hygiene::{AstPass, ExpnData, ExpnId, ExpnKind};
 use rustc_span::source_map::SourceMap;
@@ -885,7 +884,6 @@ pub struct Indeterminate;
 pub trait Resolver {
     fn next_node_id(&mut self) -> NodeId;
 
-    fn create_macro_invoc_def(&mut self) -> LocalDefId;
     fn resolve_dollar_crates(&mut self);
     fn visit_ast_fragment_with_placeholders(&mut self, expn_id: ExpnId, fragment: &AstFragment);
     fn register_builtin_macro(&mut self, ident: ast::Ident, ext: SyntaxExtension);

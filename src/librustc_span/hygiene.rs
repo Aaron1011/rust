@@ -39,7 +39,6 @@ use rustc_data_structures::sync::{Lock, Lrc};
 use rustc_macros::HashStable_Generic;
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder, UseSpecializedDecodable};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
 
 /// A `SyntaxContext` represents a chain of pairs `(ExpnId, Transparency)` named "marks".
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable)]
@@ -151,34 +150,6 @@ impl ExpnId {
 }
 
 #[derive(Debug)]
-struct TransientCache(FxHashMap<DefId, ExpnId>);
-
-impl Deref for TransientCache {
-    type Target = FxHashMap<DefId, ExpnId>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for TransientCache {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Encodable for TransientCache {
-    fn encode<E: Encoder>(&self, _e: &mut E) -> Result<(), E::Error> {
-        Ok(())
-    }
-}
-
-impl Decodable for TransientCache {
-    fn decode<D: Decoder>(_d: &mut D) -> Result<Self, D::Error> {
-        Ok(TransientCache(FxHashMap::default()))
-    }
-}
-
-#[derive(Debug)]
 pub struct HygieneData {
     /// Each expansion should have an associated expansion data, but sometimes there's a delay
     /// between creation of an expansion ID and obtaining its data (e.g. macros are collected
@@ -186,7 +157,6 @@ pub struct HygieneData {
     expn_data: Vec<Option<ExpnData>>,
     syntax_context_data: Vec<SyntaxContextData>,
     syntax_context_map: FxHashMap<(SyntaxContext, ExpnId, Transparency), SyntaxContext>,
-    def_id_cache: TransientCache,
     delayed_def_ids: FxHashMap<ExpnId, DefId>,
     remapped_expns: FxHashMap<DefId, ExpnId>,
 }
@@ -220,7 +190,6 @@ impl HygieneData {
                 dollar_crate_name: kw::DollarCrate,
             }],
             syntax_context_map: FxHashMap::default(),
-            def_id_cache: TransientCache(FxHashMap::default()),
             delayed_def_ids: FxHashMap::default(),
             remapped_expns: FxHashMap::default(),
         };
@@ -229,7 +198,6 @@ impl HygieneData {
 
         // Use CRATE_DEF_INDEX to represent the root
         data.expn_data[0].as_mut().unwrap().def_id = Some(root_def_id);
-        data.def_id_cache.insert(root_def_id, ExpnId::root());
         data
     }
 
@@ -263,7 +231,6 @@ impl HygieneData {
                 self.delayed_def_ids.insert(expn_id, def_id);
             }
         }
-        self.def_id_cache.insert(def_id, expn_id);
 
         self.expn_data.push(expn_data);
         expn_id

@@ -696,13 +696,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             ExpnId::root(),
             DUMMY_SP,
         );
-        /*let def_index = self.resolver.definitions().create_def_with_parent(
-            CRATE_DEF_INDEX,`
-            DUMMY_NODE_ID,
-            DefPathData::MacroInvoc,
-            ExpnId::root(),
-            DUMMY_SP,
-        );*/
+
         span.fresh_expansion(
             ExpnData {
                 allow_internal_unstable,

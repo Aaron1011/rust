@@ -146,10 +146,6 @@ impl<'a> base::Resolver for Resolver<'a> {
         self.next_node_id()
     }
 
-    fn create_macro_invoc_def(&mut self) -> LocalDefId {
-        self.definitions.create_macro_invoc_def()
-    }
-
     fn resolve_dollar_crates(&mut self) {
         hygiene::update_dollar_crate_names(|ctxt| {
             let ident = Ident::new(kw::DollarCrate, DUMMY_SP.with_ctxt(ctxt));

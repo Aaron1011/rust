@@ -59,9 +59,6 @@ impl<'a> DefCollector<'a> {
     fn visit_macro_invoc(&mut self, id: NodeId) {
         let expn_id = id.placeholder_to_expn_id();
         self.definitions.set_invocation_parent(expn_id, self.parent_def);
-        //let index = self.create_def(DUMMY_NODE_ID, DefPathData::MacroInvoc, DUMMY_SP);
-        //expn_id.set_def_id(DefId { krate: LOCAL_CRATE, index });
-        //self.definitions.set_invocation_def_index(index);
     }
 }
 

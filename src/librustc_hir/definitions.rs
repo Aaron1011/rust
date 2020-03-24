@@ -11,13 +11,12 @@ use crate::hir_id::DUMMY_HIR_ID;
 
 use rustc_ast::ast;
 use rustc_ast::crate_disambiguator::CrateDisambiguator;
-use rustc_ast::node_id::DUMMY_NODE_ID;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stable_hasher::StableHasher;
 use rustc_index::vec::IndexVec;
 use rustc_span::hygiene::ExpnId;
 use rustc_span::symbol::{sym, Symbol};
-use rustc_span::{Span, DUMMY_SP};
+use rustc_span::Span;
 
 use log::debug;
 use std::fmt::Write;
@@ -408,16 +407,6 @@ impl Definitions {
         self.set_invocation_parent(ExpnId::root(), root);
 
         root
-    }
-
-    pub fn create_macro_invoc_def(&mut self) -> LocalDefId {
-        self.create_def_with_parent(
-            LocalDefId { local_def_index: CRATE_DEF_INDEX },
-            DUMMY_NODE_ID,
-            DefPathData::MacroInvoc,
-            ExpnId::root(),
-            DUMMY_SP,
-        )
     }
 
     /// Adds a definition with a parent definition.
