@@ -197,8 +197,6 @@ crate struct CrateRoot<'tcx> {
     proc_macro_decls_static: Option<DefIndex>,
     proc_macro_stability: Option<attr::Stability>,
 
-    syntax_contexts: SyntaxContextTable,
-    expn_data: ExpnDataTable,
     crate_deps: Lazy<[CrateDep]>,
     dylib_dependency_formats: Lazy<[Option<LinkagePreference>]>,
     lib_features: Lazy<[(Symbol, Option<Symbol>)]>,
@@ -218,6 +216,8 @@ crate struct CrateRoot<'tcx> {
     proc_macro_data: Option<Lazy<[DefIndex]>>,
 
     exported_symbols: Lazy!([(ExportedSymbol<'tcx>, SymbolExportLevel)]),
+    syntax_contexts: SyntaxContextTable,
+    expn_data: ExpnDataTable,
 
     compiler_builtins: bool,
     needs_allocator: bool,

@@ -418,10 +418,7 @@ impl<'tcx> EncodeContext<'tcx> {
     fn encode_crate_root(&mut self) -> Lazy<CrateRoot<'tcx>> {
         let is_proc_macro = self.tcx.sess.crate_types.borrow().contains(&CrateType::ProcMacro);
 
-        // Encode the hygiene data
         let mut i = self.position();
-        let (syntax_contexts, expn_data) = self.encode_hygiene();
-        let hygiene_bytes = self.position() - i;
 
         // Encode the crate deps
         i = self.position();
@@ -518,11 +515,21 @@ impl<'tcx> EncodeContext<'tcx> {
         let expn_data_bytes = self.position() - i;*/
 
         // Encode exported symbols info. This is prefetched in `encode_metadata` so we encode
-        // this last to give the prefetching as much time as possible to complete.
+        // this as late as possible to give the prefetching as much time as possible to complete.
         i = self.position();
         let exported_symbols = self.tcx.exported_symbols(LOCAL_CRATE);
         let exported_symbols = self.encode_exported_symbols(&exported_symbols);
         let exported_symbols_bytes = self.position() - i;
+
+        // Encode the hygiene data,
+        // IMPORTANT: this *must* be the last thing that we encode. The process
+        // of encoding other items (e.g. `optimized_mir`) may cause us to load
+        // data from the incremental cache. If this causes us to deserialize a `Span`,
+        // then we may load additional `SyntaxContext`s into the global `HygieneData`.
+        // Therefore, we need to encode the hygiene data last to ensure that we encode
+        // any `SyntaxContext`s that might be used.
+        let (syntax_contexts, expn_data) = self.encode_hygiene();
+        let hygiene_bytes = self.position() - i;
 
         let attrs = tcx.hir().krate_attrs();
         let has_default_lib_allocator = attr::contains_name(&attrs, sym::default_lib_allocator);
