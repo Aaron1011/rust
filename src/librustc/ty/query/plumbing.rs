@@ -1159,10 +1159,6 @@ macro_rules! define_queries_struct {
 
                 Some(jobs)
             }
-
-            pub fn initialize_cache(&self, tcx: TyCtxt<'tcx>) {
-                self.on_disk_cache.init(tcx);
-            }
         }
     };
 }

@@ -20,7 +20,6 @@ pub fn dep_graph_tcx_init(tcx: TyCtxt<'_>) {
     }
 
     tcx.allocate_metadata_dep_nodes();
-    tcx.queries.initialize_cache(tcx);
 }
 
 type WorkProductMap = FxHashMap<WorkProductId, WorkProduct>;

@@ -34,7 +34,6 @@ const TAG_INVALID_SPAN: u8 = 1;
 
 const TAG_SYNTAX_CONTEXT: u8 = 0;
 const TAG_EXPN_DATA: u8 = 1;
-const TAG_EXPN_DATA_MAP: u8 = 2;
 
 /// Provides an interface to incremental compilation data cached from the
 /// previous compilation session. This data will eventually include the results
@@ -68,12 +67,8 @@ pub struct OnDiskCache<'sess> {
     alloc_decoding_state: AllocDecodingState,
 
     syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
-    expn_data_pos: Option<AbsoluteBytePos>,
-    expn_data: Lock<FxHashMap<DefId, AbsoluteBytePos>>,
+    expn_data: FxHashMap<DefPathHash, AbsoluteBytePos>,
     hygiene_context: CrossCrateContext,
-
-    //hygiene_index: AbsoluteBytePos,
-    init_cache: Lock<bool>,
 }
 
 // This type is used only for serialization and deserialization.
@@ -86,7 +81,9 @@ struct Footer {
     // The location of all allocations.
     interpret_alloc_index: Vec<u32>,
     syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
-    expn_data: AbsoluteBytePos,
+    // We cannot use a `DefId` here because the footer needs
+    // to be decoded before a `tcx` is available
+    expn_data: FxHashMap<DefPathHash, AbsoluteBytePos>,
 }
 
 type EncodedQueryResultIndex = Vec<(SerializedDepNodeIndex, AbsoluteBytePos)>;
@@ -144,34 +141,10 @@ impl<'sess> OnDiskCache<'sess> {
             query_result_index: footer.query_result_index.into_iter().collect(),
             prev_diagnostics_index: footer.diagnostics_index.into_iter().collect(),
             alloc_decoding_state: AllocDecodingState::new(footer.interpret_alloc_index),
-            init_cache: Lock::new(false),
             syntax_contexts: footer.syntax_contexts,
-            expn_data_pos: Some(footer.expn_data),
-            expn_data: Lock::new(Default::default()),
+            expn_data: footer.expn_data,
             hygiene_context: CrossCrateContext::from_global_hygiene(),
         }
-    }
-
-    pub fn init<'tcx>(&self, tcx: TyCtxt<'tcx>) {
-        let mut lock = self.init_cache.lock();
-        if *lock {
-            panic!("OnDiskCache already initialed!")
-        }
-        *lock = true;
-
-        if let Some(expn_data_pos) = self.expn_data_pos.as_ref() {
-            let expn_data = self.with_decoder(tcx, *expn_data_pos, |decoder| {
-                let expn_data: FxHashMap<DefId, AbsoluteBytePos> =
-                    decode_tagged(decoder, TAG_EXPN_DATA_MAP).unwrap();
-                expn_data
-            });
-
-            *self.expn_data.lock() = expn_data;
-        } else {
-        }
-
-        /*self.with_decoder(tcx, self.hygiene_index, |d| CrossCrateHygieneData::decode(d))
-        .expect("Failed to decode hygiene data!");*/
     }
 
     pub fn new_empty(source_map: &'sess SourceMap) -> Self {
@@ -186,10 +159,8 @@ impl<'sess> OnDiskCache<'sess> {
             query_result_index: Default::default(),
             prev_diagnostics_index: Default::default(),
             alloc_decoding_state: AllocDecodingState::new(Vec::new()),
-            init_cache: Lock::new(false),
             syntax_contexts: FxHashMap::default(),
-            expn_data: Lock::new(Default::default()),
-            expn_data_pos: None,
+            expn_data: FxHashMap::default(),
             hygiene_context: CrossCrateContext::from_global_hygiene(),
         }
     }
@@ -326,12 +297,10 @@ impl<'sess> OnDiskCache<'sess> {
             rustc_span::hygiene::for_all_expn_data(|data| {
                 let pos = AbsoluteBytePos::new(encoder.position());
                 encoder.encode_tagged(TAG_EXPN_DATA, data)?;
-                expn_data.insert(data.def_id.unwrap(), pos);
+                let hash = tcx.def_path_hash(data.def_id.unwrap());
+                expn_data.insert(hash, pos);
                 Ok(())
             })?;
-
-            let expn_data_pos = AbsoluteBytePos::new(encoder.position());
-            encoder.encode_tagged(TAG_EXPN_DATA_MAP, &expn_data)?;
 
             // `Encode the file footer.
             let footer_pos = encoder.position() as u64;
@@ -344,7 +313,7 @@ impl<'sess> OnDiskCache<'sess> {
                     diagnostics_index,
                     interpret_alloc_index,
                     syntax_contexts,
-                    expn_data: expn_data_pos,
+                    expn_data,
                 },
             )?;
 
@@ -518,7 +487,7 @@ struct CacheDecoder<'a, 'tcx> {
     file_index_to_stable_id: &'a FxHashMap<SourceFileIndex, StableSourceFileId>,
     alloc_decoding_session: AllocDecodingSession<'a>,
     syntax_contexts: &'a FxHashMap<u32, AbsoluteBytePos>,
-    expn_data: &'a Lock<FxHashMap<DefId, AbsoluteBytePos>>,
+    expn_data: &'a FxHashMap<DefPathHash, AbsoluteBytePos>,
     hygiene_context: &'a CrossCrateContext,
 }
 
@@ -660,8 +629,10 @@ impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for CacheDecoder<'a, 'tcx> {
 impl<'a, 'tcx> SpecializedDecoder<ExpnId> for CacheDecoder<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<ExpnId, Self::Error> {
         let expn_data = self.expn_data;
+        let tcx = self.tcx;
         rustc_span::hygiene::cross_crate_decode_expn_id(self, |this, def_id| {
-            let pos = { expn_data.lock().get(&def_id).copied().unwrap() };
+            let def_hash = tcx.def_path_hash(def_id);
+            let pos = expn_data[&def_hash];
             this.with_position(pos.to_usize(), |decoder| {
                 let data: ExpnData = decode_tagged(decoder, TAG_EXPN_DATA)?;
                 Ok(data)
