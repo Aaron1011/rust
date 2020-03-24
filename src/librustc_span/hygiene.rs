@@ -30,7 +30,7 @@ use crate::symbol::{kw, sym, Symbol};
 use crate::{HashStableContext, GLOBALS};
 use crate::{Span, DUMMY_SP};
 
-use crate::def_id::{DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE};
+use crate::def_id::{DefId, DefIndex, LocalDefId, CRATE_DEF_INDEX, LOCAL_CRATE};
 use log::*;
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::FxHashMap;
@@ -82,8 +82,8 @@ pub enum Transparency {
 }
 
 impl ExpnId {
-    pub fn fresh(expn_data: Option<ExpnData>, def_index: DefIndex) -> Self {
-        HygieneData::with(|data| data.fresh_expn(expn_data, DefId::local(def_index)))
+    pub fn fresh(expn_data: Option<ExpnData>) -> Self {
+        HygieneData::with(|data| data.fresh_expn(expn_data))
     }
 
     /// The ID of the theoretical expansion that generates freshly parsed, unexpanded AST.
@@ -105,6 +105,19 @@ impl ExpnId {
     #[inline]
     pub fn expn_data(self) -> ExpnData {
         HygieneData::with(|data| data.expn_data(self).clone())
+    }
+
+    pub fn set_def_id(self, def_id: LocalDefId) {
+        HygieneData::with(|data| match data.expn_data[self.0 as usize].as_mut() {
+            Some(expn_data) => {
+                expn_data.def_id.expect_none("DefId was reset for ExpnId!");
+                expn_data.def_id = Some(def_id.to_def_id());
+            }
+            None => data
+                .delayed_def_ids
+                .insert(self, def_id.to_def_id())
+                .expect_none("Delayed DefId was reset for ExpnId"),
+        })
     }
 
     #[inline]
@@ -179,8 +192,15 @@ pub fn make_syntax_ctxt_map<CTX: HashStableContext>(
 
 impl HygieneData {
     crate fn new(edition: Edition) -> Self {
+        let root_def_id = LocalDefId { local_def_index: CRATE_DEF_INDEX };
+
         let mut data = HygieneData {
-            expn_data: vec![Some(ExpnData::default(ExpnKind::Root, DUMMY_SP, edition))],
+            expn_data: vec![Some(ExpnData::default(
+                ExpnKind::Root,
+                DUMMY_SP,
+                edition,
+                Some(root_def_id),
+            ))],
             syntax_context_data: vec![SyntaxContextData {
                 outer_expn: ExpnId::root(),
                 outer_transparency: Transparency::Opaque,
@@ -194,10 +214,6 @@ impl HygieneData {
             remapped_expns: FxHashMap::default(),
         };
 
-        let root_def_id = DefId { krate: LOCAL_CRATE, index: CRATE_DEF_INDEX };
-
-        // Use CRATE_DEF_INDEX to represent the root
-        data.expn_data[0].as_mut().unwrap().def_id = Some(root_def_id);
         data
     }
 
@@ -220,8 +236,10 @@ impl HygieneData {
         *old_expn_data = Some(expn_data);
     }
 
-    fn fresh_expn(&mut self, mut expn_data: Option<ExpnData>, def_id: DefId) -> ExpnId {
-        let expn_id = ExpnId(self.expn_data.len() as u32);
+    fn fresh_expn(&mut self, mut expn_data: Option<ExpnData>) -> ExpnId {
+        self.expn_data.push(expn_data);
+        ExpnId(self.expn_data.len() as u32 - 1)
+        /*let expn_id = ExpnId(self.expn_data.len() as u32);
         match &mut expn_data {
             Some(inner) => {
                 assert!(inner.def_id.is_none(), "Provide the `DefId` as a parameter!");
@@ -233,7 +251,7 @@ impl HygieneData {
         }
 
         self.expn_data.push(expn_data);
-        expn_id
+        expn_id*/
     }
 
     fn expn_data(&self, expn_id: ExpnId) -> &ExpnData {
@@ -683,18 +701,17 @@ impl Span {
     /// other compiler-generated code to set per-span properties like allowed unstable features.
     /// The returned span belongs to the created expansion and has the new properties,
     /// but its location is inherited from the current span.
-    pub fn fresh_expansion(self, expn_data: ExpnData, def_index: DefIndex) -> Span {
-        self.fresh_expansion_with_transparency(expn_data, Transparency::Transparent, def_index)
+    pub fn fresh_expansion(self, expn_data: ExpnData) -> Span {
+        self.fresh_expansion_with_transparency(expn_data, Transparency::Transparent)
     }
 
     pub fn fresh_expansion_with_transparency(
         self,
         expn_data: ExpnData,
         transparency: Transparency,
-        def_index: DefIndex,
     ) -> Span {
         HygieneData::with(|data| {
-            let expn_id = data.fresh_expn(Some(expn_data), DefId::local(def_index));
+            let expn_id = data.fresh_expn(Some(expn_data));
             self.with_ctxt(data.apply_mark(SyntaxContext::root(), expn_id, transparency))
         })
     }
@@ -745,7 +762,12 @@ pub struct ExpnData {
 
 impl ExpnData {
     /// Constructs expansion data with default properties.
-    pub fn default(kind: ExpnKind, call_site: Span, edition: Edition) -> ExpnData {
+    pub fn default(
+        kind: ExpnKind,
+        call_site: Span,
+        edition: Edition,
+        def_id: Option<LocalDefId>,
+    ) -> ExpnData {
         ExpnData {
             kind,
             parent: ExpnId::root(),
@@ -755,7 +777,7 @@ impl ExpnData {
             allow_internal_unsafe: false,
             local_inner_macros: false,
             edition,
-            def_id: None,
+            def_id: def_id.map(|d| d.to_def_id()),
         }
     }
 
@@ -764,10 +786,11 @@ impl ExpnData {
         call_site: Span,
         edition: Edition,
         allow_internal_unstable: Lrc<[Symbol]>,
+        def_id: Option<LocalDefId>,
     ) -> ExpnData {
         ExpnData {
             allow_internal_unstable: Some(allow_internal_unstable),
-            ..ExpnData::default(kind, call_site, edition)
+            ..ExpnData::default(kind, call_site, edition, def_id)
         }
     }
 
