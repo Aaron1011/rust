@@ -15,7 +15,7 @@ use rustc_hir as hir;
 use rustc_hir::def::CtorKind;
 use rustc_hir::def_id::{DefId, DefIndex};
 use rustc_index::vec::IndexVec;
-use rustc_serialize::{opaque::Encoder, UseSpecializedDecodable, UseSpecializedEncodable};
+use rustc_serialize::opaque::Encoder;
 use rustc_session::config::SymbolManglingVersion;
 use rustc_session::CrateDisambiguator;
 use rustc_span::edition::Edition;
@@ -65,15 +65,6 @@ impl<T> LazyMeta for T {
 
     default fn min_size(_: ()) -> usize {
         assert_ne!(std::mem::size_of::<T>(), 0);
-        1
-    }
-}
-
-impl LazyMeta for CrossCrateHygieneData {
-    fn min_size(_: ()) -> usize {
-        // `CrossCrateHygieneData` is zero-sized, but the data we
-        // actually encode is always at least one byte (we encode multiple `Vec`s,
-        // which requires storing a length)
         1
     }
 }
@@ -421,11 +412,6 @@ struct GeneratorData<'tcx> {
 }
 
 // Tags used for encoding Spans:
-
-struct CrossCrateHygieneData;
-
-impl UseSpecializedEncodable for CrossCrateHygieneData {}
-impl UseSpecializedDecodable for CrossCrateHygieneData {}
 
 const TAG_VALID_SPAN_LOCAL: u8 = 0;
 const TAG_VALID_SPAN_FOREIGN: u8 = 1;

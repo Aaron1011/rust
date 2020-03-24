@@ -1915,9 +1915,3 @@ fn encode_metadata_impl(tcx: TyCtxt<'_>) -> EncodedMetadata {
 
     EncodedMetadata { raw_data: result }
 }
-
-impl<'tcx> SpecializedEncoder<CrossCrateHygieneData> for EncodeContext<'tcx> {
-    fn specialized_encode(&mut self, _: &CrossCrateHygieneData) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
