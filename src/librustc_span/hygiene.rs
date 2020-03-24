@@ -119,26 +119,6 @@ impl ExpnId {
         })
     }
 
-    /*#[inline]
-    pub fn set_def_id(self, def_id: DefId) {
-        HygieneData::with(|data| match &mut data.expn_data[self.0 as usize] {
-            Some(expn_data) => {
-                assert!(expn_data.def_id.is_none(), "tried to overwrite DefId!");
-                expn_data.def_id = Some(def_id);
-            }
-            None => {
-                let old_def_id = data.delayed_def_ids.insert(self, def_id);
-                assert!(
-                    old_def_id.is_none(),
-                    "tried to reset delayed DefId: expn_id={:?} old={:?} new={:?}",
-                    self,
-                    old_def_id,
-                    def_id
-                );
-            }
-        })
-    }*/
-
     #[inline]
     pub fn def_id(self) -> Option<DefId> {
         HygieneData::with(|data| data.expn_data(self).def_id)
@@ -214,34 +194,6 @@ pub struct HygieneData {
     delayed_def_ids: FxHashMap<ExpnId, DefId>,
     remapped_expns: FxHashMap<DefId, ExpnId>,
 }
-
-/*impl<CTX> HashStable<CTX> for SyntaxContextData {
-    fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
-        // Since the same expansion context is usually referenced many
-        // times, we cache a stable hash of it and hash that instead of
-        // recursing every time.
-        thread_local! {
-            static CACHE: RefCell<FxHashMap<hygiene::ExpnId, u64>> = Default::default();
-        }
-
-        let sub_hash: u64 = CACHE.with(|cache| {
-            let expn_id = self.outer_expn();
-
-            if let Some(&sub_hash) = cache.borrow().get(&expn_id) {
-                return sub_hash;
-            }
-
-            let mut hasher = StableHasher::new();
-            expn_id.expn_data().hash_stable(ctx, &mut hasher);
-            let sub_hash: Fingerprint = hasher.finish();
-            let sub_hash = sub_hash.to_smaller_hash();
-            cache.borrow_mut().insert(expn_id, sub_hash);
-            sub_hash
-        });
-
-        sub_hash.hash_stable(ctx, hasher);
-    }
-}*/
 
 pub fn make_syntax_ctxt_map<CTX: HashStableContext>(
     hcx: &mut CTX,
@@ -1201,28 +1153,6 @@ pub fn cross_crate_decode_syntax_context<
     });
 
     return Ok(new_ctxt);
-
-    /*let remapped_ctxt =
-        HygieneData::with(|hygiene_data| hygiene_data.remapped_ctxts.get(&ctxt).copied());
-
-    if let Some(remapped_ctxt) = remapped_ctxt {
-        return Ok(remapped_ctxt);
-    }
-
-    return Ok(new_ctxt);*/
-
-    /*if context.already_decoded.borrow_mut().insert(ctxt) {
-        let data = decode_data(raw_id)?;
-        let new_id =
-        HygieneData::with(|hygiene_data| {
-            hygi
-        })
-    }
-    debug!(
-        "cross_crate_decode_syntax_context: raw_id={:?} syntax_context_offset={:?} ctxt={:?}",
-        raw_id, context.syntax_context_offset, ctxt
-    );
-    Ok(ctxt)*/
 }
 
 pub fn for_all_data<E, F: FnMut((u32, &SyntaxContextData)) -> Result<(), E>>(
@@ -1247,152 +1177,4 @@ pub fn for_all_expn_data<E, F: FnMut((u32, &ExpnData)) -> Result<(), E>>(
     }
     Ok(())
 }
-
-/*pub fn cross_crate_encode<E: Encoder>(ctxt: En) -> Result<(), E::Error> {
-
-
-    let expn_data: Vec<ExpnData> = HygieneData::with(|data| {
-        debug!("same_crate_encode: expm_data={:?}", data.expn_data);
-        data.expn_data
-            .clone()
-            .into_iter()
-            .skip(1) // Skip encoding the root
-            .map(|d| d.expect("Tried to encode misisng ExpnData"))
-            .collect()
-    });
-
-    let mut unique_def_ids = FxHashSet::default();
-
-    let expn_def_ids: Vec<DefId> = expn_data
-        .iter()
-        .map(|d| {
-            let def_id = d.def_id.unwrap_or_else(|| panic!("Missing `DefId` for data {:?}", d));
-            if !unique_def_ids.insert(def_id) {
-                panic!("Duplicate DefId {:?}", def_id);
-            }
-            def_id
-        })
-        .collect();
-
-    debug!("same_crate_encode: expn_def_ids={:?}", expn_def_ids);
-    debug!("same_crate_encode: expn_data={:?}", expn_data);
-    expn_def_ids.encode(e)?;
-    expn_data.encode(e)?;
-
-    // FIXME: Make this less horribly inefficient
-    let (syntax_context_data, syntax_context_map): (Vec<_>, _) = HygieneData::with(|data| {
-        // Skip serializing the root
-        (
-            data.syntax_context_data.clone().into_iter().skip(1).collect(),
-            data.syntax_context_map.clone(),
-        )
-    });
-
-    for (i, data) in syntax_context_data.into_iter().enumerate()) {
-        let val =
-    }
-
-    debug!("same_crate_encode: syntax_context_data={:?}", syntax_context_data);
-    debug!("same_crate_encode: syntax_context_map={:?}", syntax_context_map);
-    syntax_context_data.encode(e)?;
-    syntax_context_map.encode(e)?;
-
-    /*HygieneData::with(|data| {
-        data.syntax_context_data.encode(e)?;
-        data.syntax_context_map.encode(e)?;
-        Ok(())
-    })?;*/
-    Ok(())
-}*/
-
-/*pub fn cross_crate_decode<D: Decoder>(
-    d: &mut D,
-    context: &CrossCrateContext,
-) -> Result<(), D::Error> {
-    let mut unique_def_ids = FxHashSet::default();
-
-    HygieneData::with(|data| {
-        // Populate def_id_cache
-        let expn_def_ids: Vec<DefId> = Decodable::decode(d)?;
-        debug!("cross_crate_decode: expn_def_ids={:?}", expn_def_ids);
-        for def_id in expn_def_ids {
-            if !unique_def_ids.insert(def_id) {
-                panic!("Duplicate `DefId` {:?}", def_id);
-            }
-            if !data.def_id_cache.contains_key(&def_id) {
-                let fresh_id = data.fresh_expn(None, def_id);
-                data.def_id_cache.insert(def_id, fresh_id);
-            }
-        }
-        Ok(())
-    })?;
-
-    // Make sure we deserialize outside of a `HygieneData::with`,
-    // so that the `ExpnId` deserializer can lookup the `DefId`
-    // in the cache
-    let all_expn_data: Vec<ExpnData> = Decodable::decode(d)?;
-    debug!("cross_crate_decode: all_expn_data={:?}", all_expn_data);
-
-    HygieneData::with(|data| {
-        for expn_data in all_expn_data {
-            let expn_id = data.def_id_cache
-                [&expn_data.def_id.expect("Missing `DefId` for deserialized data")];
-            data.set_expn_data(expn_id, expn_data, true);
-        }
-
-        //assert!(context.syntax_context_offset.get().is_none());
-        //context.syntax_context_offset.set(Some(data.syntax_context_data.len() as u32));
-        debug!("cross_crate_decode: syntax_context_offset={:?}", context.syntax_context_offset);
-    });
-
-    let syntax_context_data: Vec<SyntaxContextData> = Decodable::decode(d)?;
-    let syntax_context_map: FxHashMap<(SyntaxContext, ExpnId, Transparency), SyntaxContext> =
-        Decodable::decode(d)?;
-
-    debug!("cross_crate_decode: syntax_context_data={:?}", syntax_context_data);
-    debug!("cross_crate_decode: syntax_context_map={:?}", syntax_context_map);
-
-    HygieneData::with(|data| {
-        data.syntax_context_data.extend(syntax_context_data);
-        data.syntax_context_map.extend(syntax_context_map);
-    });
-
-    Ok(())
-
-    /*let expn_data = <Vec<DefId> as Decodable>::decode(d)?;
-    for expn_def_id in expn_data {
-        let fresh_expn_id = match data.def_id_cache.entry(def_id) {
-            Entry::Occupied(e) => Ok(*e.get()),
-            Entry::Vacant(_) => {
-                let fresh_id = data.fresh_expn(None);
-                Err(fresh_id)
-            }
-        };
-
-        let expn_id = match fresh_expn_id {
-            Ok(id) => id,
-            Err(id) => {
-                data.def_id_cache.insert(def_id, id);
-                id
-            }
-        };
-
-        //data.def_id_cache.insert(def_id, fresh_expn_id);
-        //data.expn_data.push(Some(expn_data))
-    }*/
-}*/
-
-//impl UseSpecializedEncodable for SyntaxContext {}
 impl UseSpecializedDecodable for SyntaxContext {}
-
-/*impl Encodable for SyntaxContext {
-    fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
-        self.0.encode(e)
-    }
-}
-
-impl Decodable for SyntaxContext {
-    fn decode<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-
-    }
-}*/

@@ -539,49 +539,6 @@ struct CacheDecoder<'a, 'tcx> {
     hygiene_context: &'a CrossCrateContext,
 }
 
-/*impl<'a, 'tcx> HasSameCrateContext for CacheDecoder<'a, 'tcx> {
-    fn get_same_crate_context(&self) -> &SameCrateContext {
-        &self.hygiene_context
-    }
-}*/
-
-struct FooterDecoder<'a, 'tcx> {
-    tcx: &'tcx (),
-    opaque: &'a mut opaque::Decoder<'a>,
-}
-
-impl<'a, 'tcx> Decoder for FooterDecoder<'a, 'tcx> {
-    type Error = String;
-
-    __impl_decoder_methods! {
-        read_nil -> ();
-
-        read_u128 -> u128;
-        read_u64 -> u64;
-        read_u32 -> u32;
-        read_u16 -> u16;
-        read_u8 -> u8;
-        read_usize -> usize;
-
-        read_i128 -> i128;
-        read_i64 -> i64;
-        read_i32 -> i32;
-        read_i16 -> i16;
-        read_i8 -> i8;
-        read_isize -> isize;
-
-        read_bool -> bool;
-        read_f64 -> f64;
-        read_f32 -> f32;
-        read_char -> char;
-        read_str -> Cow<'_, str>;
-    }
-
-    fn error(&mut self, err: &str) -> Self::Error {
-        self.opaque.error(err)
-    }
-}
-
 impl<'a, 'tcx> CacheDecoder<'a, 'tcx> {
     fn file_index_to_file(&self, index: SourceFileIndex) -> Lrc<SourceFile> {
         let CacheDecoder {
@@ -615,12 +572,6 @@ impl<'a> DecoderWithPosition for opaque::Decoder<'a> {
 }
 
 impl<'a, 'tcx> DecoderWithPosition for CacheDecoder<'a, 'tcx> {
-    fn position(&self) -> usize {
-        self.opaque.position()
-    }
-}
-
-impl<'a, 'tcx> DecoderWithPosition for FooterDecoder<'a, 'tcx> {
     fn position(&self) -> usize {
         self.opaque.position()
     }
@@ -705,25 +656,6 @@ impl<'a, 'tcx> TyDecoder<'tcx> for CacheDecoder<'a, 'tcx> {
 }
 
 implement_ty_decoder!(CacheDecoder<'a, 'tcx>);
-//implement_ty_decoder!(__footer_decoder_impl, FooterDecoder<'a, 'tcx>);
-
-/*impl<'a, 'tcx, E> SpecializedEncoder<SyntaxContext> for CacheEncoder<'a, 'tcx, E>
-where
-    E: 'a + TyEncoder,
-{
-    fn specialized_encode(&mut self, ctxt: &SyntaxContext) -> Result<(), Self::Error> {
-        /*let mut hasher = StableHasher::new();
-        let mut hcx = self.tcx.create_stable_hashing_context();
-        ctxt.hash_stable(&mut hcx, &mut hasher);
-        let fingerprint: Fingerprint = */
-        /*rustc_span::hygiene::incr_comp_encode_syntax_context(
-            *ctxt,
-            &mut self.tcx.create_stable_hashing_context(),
-            self,
-        )*/
-        //rustc_span::hygiene::cross_crate_encode_syntax_context(*ctxt, self)
-    }
-}*/
 
 impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for CacheDecoder<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
@@ -739,16 +671,6 @@ impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for CacheDecoder<'a, 'tcx> {
                 })
             },
         )
-        //let ctxt = self.hygiene_context.clone();
-        //rustc_span::hygiene::incr_comp_decode_syntax_context_infallible(self, &ctxt.get())
-        //rustc_span::hygiene::cross_crate_decode_syntax_context(self, &self.hygiene_context.clone())
-        /*let raw_id = Su32::decode(self.opaque);
-
-        let syntax_context_remap = self.syntax_context_remap.lock();
-        match syntax_context_remap.entry(raw_id) {
-            Entry::Occupied(e) => *e.get(),
-            Entry::Vacant(e) => self.hy,
-        }*/
     }
 }
 
@@ -1012,21 +934,6 @@ where
         len.encode(self)?;
         span_data.ctxt.encode(self)?;
         Ok(())
-
-        /*if span_data.ctxt == SyntaxContext::root() {
-            TAG_NO_EXPN_DATA.encode(self)
-        } else {
-            let (expn_id, transparency, expn_data) = span_data.ctxt.outer_mark_with_data();
-            if let Some(pos) = self.expn_data_shorthands.get(&expn_id).cloned() {
-                TAG_EXPN_DATA_SHORTHAND.encode(self)?;
-                pos.encode(self)
-            } else {
-                TAG_EXPN_DATA_INLINE.encode(self)?;
-                let pos = AbsoluteBytePos::new(self.position());
-                self.expn_data_shorthands.insert(expn_id, pos);
-                (expn_data, transparency).encode(self)
-            }
-        }*/
     }
 }
 
