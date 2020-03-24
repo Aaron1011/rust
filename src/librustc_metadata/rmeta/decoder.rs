@@ -1,6 +1,6 @@
 // Decoding metadata from a single crate's metadata
 
-use crate::creader::{CStore, CrateMetadataRef};
+use crate::creader::CrateMetadataRef;
 use crate::rmeta::table::{FixedSizeEncoding, Table};
 use crate::rmeta::*;
 
@@ -46,7 +46,6 @@ use rustc_span::{self, hygiene::MacroKind, BytePos, ExpnId, Pos, Span, SyntaxCon
 
 pub use cstore_impl::{provide, provide_extern};
 use rustc_span::hygiene::CrossCrateContext;
-use std::rc::Rc;
 
 mod cstore_impl;
 

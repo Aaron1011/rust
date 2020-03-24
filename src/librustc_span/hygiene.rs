@@ -33,15 +33,11 @@ use crate::{Span, DUMMY_SP};
 use crate::def_id::{DefId, DefIndex, CRATE_DEF_INDEX, LOCAL_CRATE};
 use log::*;
 use rustc_data_structures::fingerprint::Fingerprint;
-use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::sync::{Lock, Lrc};
 use rustc_macros::HashStable_Generic;
-use rustc_serialize::{
-    Decodable, Decoder, Encodable, Encoder, UseSpecializedDecodable, UseSpecializedEncodable,
-};
-use std::cell::RefCell;
-use std::collections::hash_map::Entry;
+use rustc_serialize::{Decodable, Decoder, Encodable, Encoder, UseSpecializedDecodable};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
@@ -974,40 +970,6 @@ impl Encodable for ExpnId {
     }
 }
 
-/*
-impl Decodable for ExpnId {
-    fn decode<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
-        let def_id = DefId::decode(d)?;
-        if def_id.index == CRATE_DEF_INDEX {
-            return Ok(ExpnId::root());
-        }
-        Ok(HygieneData::with(|data| {
-            *data
-                .def_id_cache
-                .get(&def_id)
-                .unwrap_or_else(|| panic!("Missing ExpnId for DefId {:?}", def_id))
-        }))
-        /*let fresh_expn_id = match data.def_id_cache.entry(def_id) {
-            Entry::Occupied(e) => return *e.get(),
-            Entry::Vacant(_) => {
-                let fresh_id = data.fresh_expn(None);
-                fresh_id
-            }
-        };
-        data.def_id_cache.insert(def_id, fresh_expn_id);
-        fresh_expn_id*/
-        //}))
-    }
-}*/
-
-pub trait HasSameCrateContext {
-    fn get_same_crate_context(&self) -> &SameCrateContext;
-}
-
-pub struct SameCrateContext {
-    pub syntax_context_map: FxHashMap<Fingerprint, SyntaxContext>,
-}
-
 pub struct CrossCrateContext {
     remapped_ctxts: Lock<FxHashMap<u32, SyntaxContext>>,
 }
@@ -1015,12 +977,6 @@ pub struct CrossCrateContext {
 impl CrossCrateContext {
     pub fn from_global_hygiene() -> CrossCrateContext {
         CrossCrateContext { remapped_ctxts: Lock::new(FxHashMap::default()) }
-    }
-}
-
-impl SameCrateContext {
-    pub fn new() -> SameCrateContext {
-        SameCrateContext { syntax_context_map: FxHashMap::default() }
     }
 }
 
@@ -1129,15 +1085,10 @@ pub fn for_all_data<E, F: FnMut((u32, &SyntaxContextData)) -> Result<(), E>>(
     Ok(())
 }
 
-pub fn for_all_expn_data<E, F: FnMut((u32, &ExpnData)) -> Result<(), E>>(
-    mut f: F,
-) -> Result<(), E> {
+pub fn for_all_expn_data<E, F: FnMut(&ExpnData) -> Result<(), E>>(mut f: F) -> Result<(), E> {
     let all_data = HygieneData::with(|data| data.expn_data.clone());
-    for (i, data) in all_data.into_iter().enumerate() {
-        f((
-            i as u32,
-            &data.unwrap_or_else(|| panic!("Missing ExpnData for {:?}", ExpnId(i as u32))),
-        ))?;
+    for data in all_data {
+        f(&data.unwrap_or_else(|| panic!("Missing ExpnData!")))?;
     }
     Ok(())
 }

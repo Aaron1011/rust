@@ -20,7 +20,7 @@ use rustc_session::config::SymbolManglingVersion;
 use rustc_session::CrateDisambiguator;
 use rustc_span::edition::Edition;
 use rustc_span::symbol::Symbol;
-use rustc_span::{self, ExpnData, Span, SyntaxContext};
+use rustc_span::{self, ExpnData, Span};
 use rustc_target::spec::{PanicStrategy, TargetTriple};
 
 use std::marker::PhantomData;

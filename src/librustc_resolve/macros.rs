@@ -18,7 +18,7 @@ use rustc_expand::compile_declarative_macro;
 use rustc_expand::expand::{AstFragment, AstFragmentKind, Invocation, InvocationKind};
 use rustc_feature::is_builtin_attr_name;
 use rustc_hir::def::{self, DefKind, NonMacroAttrKind};
-use rustc_hir::def_id::{self, DefIndex};
+use rustc_hir::def_id;
 use rustc_session::lint::builtin::UNUSED_MACROS;
 use rustc_session::Session;
 use rustc_span::def_id::LocalDefId;
@@ -27,8 +27,6 @@ use rustc_span::hygiene::{self, ExpnData, ExpnId, ExpnKind};
 use rustc_span::symbol::{kw, sym, Symbol};
 use rustc_span::{Span, DUMMY_SP};
 
-use rustc::hir::map::DefPathData;
-use rustc_ast::node_id::DUMMY_NODE_ID;
 use rustc_data_structures::sync::Lrc;
 use rustc_span::hygiene::{AstPass, MacroKind};
 use std::{mem, ptr};

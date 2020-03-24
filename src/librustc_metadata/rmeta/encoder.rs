@@ -31,7 +31,7 @@ use rustc_serialize::{opaque, Encodable, Encoder, SpecializedEncoder};
 use rustc_session::config::{self, CrateType};
 use rustc_span::source_map::Spanned;
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
-use rustc_span::{self, ExternalSource, FileName, SourceFile, Span, SyntaxContext};
+use rustc_span::{self, ExternalSource, FileName, SourceFile, Span};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -421,7 +421,6 @@ impl<'tcx> EncodeContext<'tcx> {
         let mut i = self.position();
 
         // Encode the crate deps
-        i = self.position();
         let crate_deps = self.encode_crate_deps();
         let dylib_dependency_formats = self.encode_dylib_dependency_formats();
         let dep_bytes = self.position() - i;
@@ -1389,7 +1388,7 @@ impl EncodeContext<'tcx> {
             Ok::<(), !>(())
         })
         .unwrap();
-        rustc_span::hygiene::for_all_expn_data(|(index, expn_data)| {
+        rustc_span::hygiene::for_all_expn_data(|expn_data| {
             let def_id = expn_data.def_id.unwrap();
             // Don't encode the ExpnData for ExpnIds from foreign crates.
             // The crate that defines the ExpnId will store the ExpnData,
