@@ -1922,9 +1922,3 @@ impl<'tcx> SpecializedEncoder<CrossCrateHygieneData> for EncodeContext<'tcx> {
         Ok(())
     }
 }
-
-/*impl<'tcx> SpecializedEncoder<SyntaxContext> for EncodeContext<'tcx> {
-    fn specialized_encode(&mut self, ctxt: &SyntaxContext) -> Result<(), Self::Error> {
-        rustc_span::hygiene::cross_crate_encode_syntax_context(*ctxt, self)
-    }
-}*/

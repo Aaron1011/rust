@@ -1024,42 +1024,6 @@ impl SameCrateContext {
     }
 }
 
-pub fn incr_comp_encode_syntax_context<E: Encoder, CTX: HashStableContext>(
-    ctxt: SyntaxContext,
-    hcx: &mut CTX,
-    e: &mut E,
-) -> Result<(), E::Error> {
-    let mut hasher = StableHasher::new();
-    ctxt.hash_stable(hcx, &mut hasher);
-    let fingerprint: Fingerprint = hasher.finish();
-    fingerprint.encode(e)
-}
-
-pub fn incr_comp_decode_syntax_context_infallible<D: Decoder>(
-    d: &mut D,
-    context: &SameCrateContext,
-) -> Result<SyntaxContext, D::Error> {
-    let fingerprint: Fingerprint = Decodable::decode(d)?;
-    context
-        .syntax_context_map
-        .get(&fingerprint)
-        .cloned()
-        .ok_or_else(|| d.error(&format!("Unknown fingerprint {:?}", fingerprint)))
-}
-
-pub fn cross_crate_encode_syntax_context<E: Encoder>(
-    ctxt: SyntaxContext,
-    e: &mut E,
-) -> Result<(), E::Error> {
-    ctxt.0.encode(e)
-}
-
-pub fn cross_crate_decode_syntax_context_raw<D: Decoder>(
-    d: &mut D,
-) -> Result<SyntaxContext, D::Error> {
-    Ok(SyntaxContext::from_u32(u32::decode(d)?))
-}
-
 pub fn cross_crate_decode_expn_id<
     D: Decoder,
     F: FnOnce(&mut D, DefId) -> Result<ExpnData, D::Error>,
