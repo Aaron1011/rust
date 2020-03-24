@@ -1576,7 +1576,8 @@ where
         }
 
         if *self == DUMMY_SP {
-            return std::hash::Hash::hash(&TAG_INVALID_SPAN, hasher);
+            std::hash::Hash::hash(&TAG_INVALID_SPAN, hasher);
+            return;
         }
 
         // If this is not an empty or invalid span, we want to hash the last
@@ -1586,12 +1587,16 @@ where
         let (file_lo, line_lo, col_lo) = match ctx.byte_pos_to_line_and_col(span.lo) {
             Some(pos) => pos,
             None => {
-                return std::hash::Hash::hash(&TAG_INVALID_SPAN, hasher);
+                std::hash::Hash::hash(&TAG_INVALID_SPAN, hasher);
+                span.ctxt.hash_stable(ctx, hasher);
+                return;
             }
         };
 
         if !file_lo.contains(span.hi) {
-            return std::hash::Hash::hash(&TAG_INVALID_SPAN, hasher);
+            std::hash::Hash::hash(&TAG_INVALID_SPAN, hasher);
+            span.ctxt.hash_stable(ctx, hasher);
+            return;
         }
 
         std::hash::Hash::hash(&TAG_VALID_SPAN, hasher);
