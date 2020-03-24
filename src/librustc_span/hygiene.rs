@@ -240,41 +240,11 @@ impl HygieneData {
     fn set_expn_data(&mut self, expn_id: ExpnId, mut expn_data: ExpnData, deserialized: bool) {
         let old_expn_data = &mut self.expn_data[expn_id.0 as usize];
 
-        /*if let Some(old_data) = old_expn_data {
-            if !deserialized || *old_data != expn_data {
-                panic!(
-                    "expansion data is reset for an expansion ID {:?}: deserialized={} old={:?} new={:?},\
-                    old_span_ctxt='{:?}' new_span_ctxt='{:?}'",
-                    expn_id,
-                    deserialized,
-                    old_data,
-                    expn_data,
-                    format!(
-                        "{:?} {:?} {:?} {:?}",
-                        old_data.call_site.ctxt(),
-                        self.syntax_context_data[old_data.call_site.ctxt().0 as usize],
-                        old_data.def_site.ctxt(),
-                        self.syntax_context_data[old_data.def_site.ctxt().0 as usize]
-                    ),
-                    format!(
-                        "{:?} {:?} {:?} {:?}",
-                        expn_data.call_site.ctxt(),
-                        self.syntax_context_data[expn_data.call_site.ctxt().0 as usize],
-                        expn_data.def_site.ctxt(),
-                        self.syntax_context_data[expn_data.def_site.ctxt().0 as usize]
-                    )
-                )
-            }
-        }*/
-
         if !deserialized {
             assert!(expn_data.def_id.is_none(), "`DefId` should not be initially set!");
             // May be `None` - in that case, it will be filled in later
             let delayed_def_id = self.delayed_def_ids.remove(&expn_id);
             expn_data.def_id = delayed_def_id;
-        /*if let Some(def_id) = expn_data.def_id {
-            self.def_id_cache.insert(def_id, expn_id).expect_none("Tried to overwrite DefId!");
-        }*/
         } else {
             assert!(expn_data.def_id.is_some(), "`ExpnData` deserialized without a `DefId`!")
         }
@@ -297,7 +267,6 @@ impl HygieneData {
 
         self.expn_data.push(expn_data);
         expn_id
-        //ExpnId(self.expn_data.len() as u32 - 1)
     }
 
     fn expn_data(&self, expn_id: ExpnId) -> &ExpnData {
