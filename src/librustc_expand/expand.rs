@@ -482,7 +482,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                     let mut derive_placeholders = Vec::with_capacity(derives.len());
                     invocations.reserve(derives.len());
                     for path in derives {
-                        let expn_id = self.fresh_expn_id(None);
+                        let expn_id = self.cx.fresh_expn_id(self.monotonic, None);
                         derive_placeholders.push(NodeId::placeholder_from_expn_id(expn_id));
                         invocations.push((
                             Invocation {
@@ -1010,13 +1010,6 @@ struct InvocationCollector<'a, 'b> {
 }
 
 impl<'a, 'b> InvocationCollector<'a, 'b> {
-    fn fresh_expn_id(&mut self, expn_data: Option<ExpnDat>) {
-        let expn_id = ExpnId::fresh(expn_data);
-        if !self.monotonic {
-            expn_id.set_def_id(self.cx.resolver.make_dummy_macro_invoc_def());
-        }
-    }
-
     fn collect(&mut self, fragment_kind: AstFragmentKind, kind: InvocationKind) -> AstFragment {
         // Expansion data for all the collected invocations is set upon their resolution,
         // with exception of the derive container case which is not resolved and can get
@@ -1033,7 +1026,7 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
             }),
             _ => None,
         };
-        let expn_id = self.fresh_expn_id(expn_data);
+        let expn_id = self.cx.fresh_expn_id(self.monotonic, expn_data);
         let vis = kind.placeholder_visibility();
         self.invocations.push((
             Invocation {

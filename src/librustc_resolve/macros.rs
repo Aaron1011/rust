@@ -21,13 +21,15 @@ use rustc_hir::def::{self, DefKind, NonMacroAttrKind};
 use rustc_hir::def_id;
 use rustc_session::lint::builtin::UNUSED_MACROS;
 use rustc_session::Session;
-use rustc_span::def_id::LocalDefId;
+use rustc_span::def_id::{LocalDefId, CRATE_DEF_INDEX};
 use rustc_span::edition::Edition;
 use rustc_span::hygiene::{self, ExpnData, ExpnId, ExpnKind};
 use rustc_span::symbol::{kw, sym, Symbol};
 use rustc_span::{Span, DUMMY_SP};
 
+use rustc_ast::node_id::DUMMY_NODE_ID;
 use rustc_data_structures::sync::Lrc;
+use rustc_hir::definitions::DefPathData;
 use rustc_span::hygiene::{AstPass, MacroKind};
 use std::{mem, ptr};
 
@@ -146,6 +148,16 @@ impl<'a> base::Resolver for Resolver<'a> {
         self.next_node_id()
     }
 
+    fn make_dummy_macro_invoc_def(&mut self) -> LocalDefId {
+        self.definitions.create_def_with_parent(
+            LocalDefId { local_def_index: CRATE_DEF_INDEX },
+            DUMMY_NODE_ID,
+            DefPathData::MacroInvoc,
+            ExpnId::root(),
+            DUMMY_SP,
+        )
+    }
+
     fn resolve_dollar_crates(&mut self) {
         hygiene::update_dollar_crate_names(|ctxt| {
             let ident = Ident::new(kw::DollarCrate, DUMMY_SP.with_ctxt(ctxt));
@@ -187,7 +199,7 @@ impl<'a> base::Resolver for Resolver<'a> {
             call_site,
             self.session.edition(),
             features.into(),
-            None,
+            Some(self.make_dummy_macro_invoc_def()),
         )));
 
         let parent_scope = if let Some(module_id) = parent_module_id {

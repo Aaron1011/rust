@@ -25,6 +25,7 @@ use std::iter;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use rustc_span::def_id::LocalDefId;
 crate use rustc_span::hygiene::MacroKind;
 
 #[derive(Debug, Clone)]
@@ -966,6 +967,14 @@ impl<'a> ExtCtxt<'a> {
             },
             expansions: FxHashMap::default(),
         }
+    }
+
+    pub fn fresh_expn_id(&mut self, monotonic: bool, expn_data: Option<ExpnData>) -> ExpnId {
+        let expn_id = ExpnId::fresh(expn_data);
+        if !monotonic {
+            expn_id.set_def_id(self.resolver.make_dummy_macro_invoc_def());
+        }
+        expn_id
     }
 
     /// Returns a `Folder` for deeply expanding all macros in an AST node.

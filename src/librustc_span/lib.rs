@@ -1638,7 +1638,11 @@ impl<CTX: HashStableContext> HashStable<CTX> for SyntaxContext {
                 }
 
                 let mut hasher = StableHasher::new();
-                expn_id.expn_data().def_id.expect("`DefId` not set!").hash_stable(ctx, &mut hasher);
+                expn_id
+                    .expn_data()
+                    .def_id
+                    .unwrap_or_else(|| panic!("`DefId` not set for {:?}", expn_id.expn_data()))
+                    .hash_stable(ctx, &mut hasher);
                 transparency.hash_stable(ctx, &mut hasher);
 
                 let sub_hash: Fingerprint = hasher.finish();
