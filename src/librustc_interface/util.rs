@@ -79,26 +79,7 @@ pub fn create_session(
     add_configuration(&mut cfg, &sess, &*codegen_backend);
     sess.parse_sess.config = cfg;
 
-    let sess = Lrc::new(sess);
-
-    /*thread_local! {
-        static SESS: RefCell<Option<Lrc<Session>>> = RefCell::new(None);
-    }
-
-    fn temp_span_debug(span: rustc_span::Span, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        SESS.with(|sess_global| {
-            write!(
-                f,
-                "{}",
-                sess_global.borrow().as_ref().unwrap().source_map().span_to_string(span)
-            )
-        })
-    }
-
-    SESS.with(|sess_global| *sess_global.borrow_mut() = Some(sess.clone()));
-    rustc_span::SPAN_DEBUG.swap(&(temp_span_debug as fn(_, &mut fmt::Formatter<'_>) -> _));*/
-
-    (sess, Lrc::new(codegen_backend), source_map)
+    (Lrc::new(sess), Lrc::new(codegen_backend), source_map)
 }
 
 // Temporarily have stack size set to 32MB to deal with various crates with long method
