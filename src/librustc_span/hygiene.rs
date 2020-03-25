@@ -30,7 +30,7 @@ use crate::symbol::{kw, sym, Symbol};
 use crate::{HashStableContext, GLOBALS};
 use crate::{Span, DUMMY_SP};
 
-use crate::def_id::{DefId, DefIndex, LocalDefId, CRATE_DEF_INDEX, LOCAL_CRATE};
+use crate::def_id::{DefId, LocalDefId, CRATE_DEF_INDEX};
 use log::*;
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::FxHashMap;
@@ -194,7 +194,7 @@ impl HygieneData {
     crate fn new(edition: Edition) -> Self {
         let root_def_id = LocalDefId { local_def_index: CRATE_DEF_INDEX };
 
-        let mut data = HygieneData {
+        let data = HygieneData {
             expn_data: vec![Some(ExpnData::default(
                 ExpnKind::Root,
                 DUMMY_SP,
@@ -236,22 +236,9 @@ impl HygieneData {
         *old_expn_data = Some(expn_data);
     }
 
-    fn fresh_expn(&mut self, mut expn_data: Option<ExpnData>) -> ExpnId {
+    fn fresh_expn(&mut self, expn_data: Option<ExpnData>) -> ExpnId {
         self.expn_data.push(expn_data);
         ExpnId(self.expn_data.len() as u32 - 1)
-        /*let expn_id = ExpnId(self.expn_data.len() as u32);
-        match &mut expn_data {
-            Some(inner) => {
-                assert!(inner.def_id.is_none(), "Provide the `DefId` as a parameter!");
-                inner.def_id = Some(def_id);
-            }
-            None => {
-                self.delayed_def_ids.insert(expn_id, def_id);
-            }
-        }
-
-        self.expn_data.push(expn_data);
-        expn_id*/
     }
 
     fn expn_data(&self, expn_id: ExpnId) -> &ExpnData {
