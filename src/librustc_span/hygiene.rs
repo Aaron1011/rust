@@ -899,7 +899,13 @@ impl Encodable for ExpnId {
     }
 }
 
+/// Additional information used to assist in decoding hygiene data
 pub struct HygieneContext {
+    // Maps serialized `SyntaxContext` ids to a `SyntaxContext` in the current
+    // global `HygieneData`. When we deserialize a `SyntaxContext`, we need to create
+    // a new id in the global `HygieneData`. This map tracks the ID we end up picking,
+    // so that multiple occurences of the same serialized id are decoded to the same
+    // `SyntaxContext`
     remapped_ctxts: Lock<FxHashMap<u32, SyntaxContext>>,
 }
 
@@ -937,6 +943,10 @@ pub fn decode_expn_id<D: Decoder, F: FnOnce(&mut D, DefId) -> Result<ExpnData, D
     return Ok(expn_id);
 }
 
+// Decodes `SyntaxContext`, using the provided `HygieneContext`
+// to track which `SyntaxContext`s we have already decoded.
+// The provided closure will be invoked to deserialize a `SyntaxContextData`
+// if we haven't already seen the id of the `SyntaxContext` we are deserializing.
 pub fn decode_syntax_context<
     D: Decoder,
     F: FnOnce(&mut D, u32) -> Result<SyntaxContextData, D::Error>,
@@ -959,7 +969,7 @@ pub fn decode_syntax_context<
         }
     }
 
-    // Store our allocated SyntaxContext id *before* calling the decoder function,
+    // Allocate and store SyntaxContext id *before* calling the decoder function,
     // as the SyntaxContextData may reference itself.
     let new_ctxt = HygieneData::with(|hygiene_data| {
         let new_ctxt = SyntaxContext(hygiene_data.syntax_context_data.len() as u32);

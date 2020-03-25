@@ -969,8 +969,32 @@ impl<'a> ExtCtxt<'a> {
         }
     }
 
+    // Creates a fresh `ExpnId` with the provided `ExpnData`. This should be used instead of
+    // calling `ExpnId::fresh` directly, as it properly handles the case where the resolver
+    // is in non-monotonic mode.
+    // The `monotonic` parameter should be the `monotonic` flag from `MacroExpander`
+    // or `InvocationCollector`
     pub fn fresh_expn_id(&mut self, monotonic: bool, expn_data: Option<ExpnData>) -> ExpnId {
         let expn_id = ExpnId::fresh(expn_data);
+        // Subtle: In 'monotonic' mode, we will end up invoking `DefCollector` on the AST fragment
+        // that contains this `ExpnId` (stored as a placeholder). THe `DefCollector` will then
+        // assign a `DefId` to this `ExpnId` using the correct parent definition.
+        // However, in 'mon-monotonic' mode, we will *not* invoke `DefCollector`, which will
+        // cause us to never assign a `DefId`.
+        // Currently, this is only an issue for the `concat!` macro, which performs eager expansion
+        // in non-monotonic mode. If we have something like:
+        // `concat!("Hello ", stringify!(World!))!`, then we will eagerly expand
+        // the call to `stringify!` in non-monotonic mode.
+        //
+        // To ensure that every `ExpnId` gets an associated `DefId`, we construct
+        // a `DefId` ourselves when we're in non-monotonic mode. This isn't ideal,
+        // as we need to use the crate root as a parent (`DefCollector` tracks the
+        // information needed to obtain the correct parent). This may make incremental
+        // compilation less effective: we'll end up with a bunch of `DefPath`s
+        // with disambiguators, so changes to one module can end up affecting
+        // the `DefPath`s for macro invocations in aanother module. Hopefully,
+        // this kind of usage of `concat!` is rare enough that it won't matter
+        // much in practice.
         if !monotonic {
             expn_id.set_def_id(self.resolver.make_dummy_macro_invoc_def());
         }

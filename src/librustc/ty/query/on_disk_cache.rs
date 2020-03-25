@@ -66,8 +66,23 @@ pub struct OnDiskCache<'sess> {
 
     alloc_decoding_state: AllocDecodingState,
 
+    // A map from syntax context ids to the position of their associated
+    // `SyntaxContextData`. We use a `u32` instead of a `SyntaxContext`
+    // to represent the fact that we are storing *encoded* ids. When we decode
+    // a `SyntaxContext`, a new id will be allocated from the global `HygieneData`,
+    // which will almost certainly be different than the serialized id.
     syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
+    // A map from the `DefPathHash` of an `ExpnId` to the position
+    // of their associated `ExpnData`. Ideally, we would store a `DefId`,
+    // but we need to decode this before we've constructed a `TyCtxt` (which
+    // makes it difficult to decode a `DefId`).
+
+    // Note that these `DefPathHashes` correspond to both local and foreign
+    // `DefIds` (e.g `DefId.krate` may not be `LOCAL_CRATE`). Alternatively,
+    // we could look up the `ExpnData` from the metadata of foreign crates,
+    // but it seemed easier to have `OnDiskCache` be independent of the `CStore`.
     expn_data: FxHashMap<DefPathHash, AbsoluteBytePos>,
+    // Additional information used when decoding hygiene data.
     hygiene_context: HygieneContext,
 }
 
@@ -80,9 +95,9 @@ struct Footer {
     diagnostics_index: EncodedQueryResultIndex,
     // The location of all allocations.
     interpret_alloc_index: Vec<u32>,
+    // See `OnDiskCache.syntax_contexts`
     syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
-    // We cannot use a `DefId` here because the footer needs
-    // to be decoded before a `tcx` is available
+    // See `OnDiskCache.expn_data`
     expn_data: FxHashMap<DefPathHash, AbsoluteBytePos>,
 }
 
@@ -279,6 +294,13 @@ impl<'sess> OnDiskCache<'sess> {
 
             let mut syntax_contexts = FxHashMap::default();
             let mut expn_data = FxHashMap::default();
+
+            // Encode all hygiene data (`SyntaxContextData` and `ExpnData`) from the current
+            // session.
+            // FIXME: Investigate tracking which `SyntaxContext`s and `ExpnId`s we actually
+            // need, to avoid serializing data that will never be used. This will require
+            // tracking which `SyntaxContext`s/`ExpnId`s are actually (transitively) referenced
+            // from any of the `Span`s that we serialize.
 
             rustc_span::hygiene::for_all_data(|(index, data)| {
                 let pos = AbsoluteBytePos::new(encoder.position());
@@ -606,6 +628,8 @@ impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for CacheDecoder<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
         let syntax_contexts = self.syntax_contexts;
         rustc_span::hygiene::decode_syntax_context(self, self.hygiene_context, |this, id| {
+            // This closure is invoked if we haven't already decoded the data for the `SyntaxContext` we are deserializing.
+            // We look up the position of the associated `SyntaxData` and decode it.
             let pos = syntax_contexts.get(&id).unwrap();
             this.with_position(pos.to_usize(), |decoder| {
                 let data: SyntaxContextData = decode_tagged(decoder, TAG_SYNTAX_CONTEXT)?;
@@ -620,6 +644,8 @@ impl<'a, 'tcx> SpecializedDecoder<ExpnId> for CacheDecoder<'a, 'tcx> {
         let expn_data = self.expn_data;
         let tcx = self.tcx;
         rustc_span::hygiene::decode_expn_id(self, |this, def_id| {
+            // This closure is invoked if we haven't already decoded the data for the `ExpnId` we are deserializing.
+            // We look up the position of the associated `ExpnData` and decode it.
             let def_hash = tcx.def_path_hash(def_id);
             let pos = expn_data[&def_hash];
             this.with_position(pos.to_usize(), |decoder| {
