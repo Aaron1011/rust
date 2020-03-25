@@ -1941,7 +1941,6 @@ impl<'a> Resolver<'a> {
             debug!("macro_def_crate: missing defId, treating as local")
         }
 
-        //.unwrap_or_else(|| panic!("Missing DefId for {:?} {:?}", expn_id, expn_id.expn_data()));
         if def_id.map_or(false, |did| did.krate != LOCAL_CRATE) {
             debug!("macro_def_crate: foreign DefId {:?}", def_id);
             return def_id.unwrap().krate;

@@ -174,22 +174,6 @@ pub struct HygieneData {
     remapped_expns: FxHashMap<DefId, ExpnId>,
 }
 
-pub fn make_syntax_ctxt_map<CTX: HashStableContext>(
-    hcx: &mut CTX,
-) -> FxHashMap<Fingerprint, SyntaxContext> {
-    let mut syntax_ctxt_map: FxHashMap<Fingerprint, SyntaxContext> = FxHashMap::default();
-    let len = HygieneData::with(|data| data.syntax_context_data.len());
-
-    for i in 0..len {
-        let mut hasher = StableHasher::new();
-        let ctxt = SyntaxContext(i as u32);
-        ctxt.hash_stable(hcx, &mut hasher);
-        let fingerprint = hasher.finish();
-        syntax_ctxt_map.insert(fingerprint, ctxt).expect_none("Fingerprint collision!");
-    }
-    syntax_ctxt_map
-}
-
 impl HygieneData {
     crate fn new(edition: Edition) -> Self {
         let root_def_id = LocalDefId { local_def_index: CRATE_DEF_INDEX };
