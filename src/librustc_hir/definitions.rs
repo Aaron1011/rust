@@ -267,6 +267,7 @@ pub enum DefPathData {
     CrateRoot,
     // Catch-all for random `DefId` things like `DUMMY_NODE_ID`.
     Misc,
+    // A macro invocation (e.g. `my_macro!(..)`, `#[my_attr]`, or `#[derive(MyDerive)]`)
     MacroInvoc,
 
     // Different kinds of items and item-like things:
