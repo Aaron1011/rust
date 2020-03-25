@@ -100,7 +100,6 @@ pub struct Definitions {
     /// When collecting definitions from an AST fragment produced by a macro invocation `ExpnId`
     /// we know what parent node that fragment should be attached to thanks to this table.
     invocation_parents: FxHashMap<ExpnId, LocalDefId>,
-    invocation_def_indices: FxHashMap<ExpnId, DefIndex>,
     /// Indices of unnamed struct or variant fields with unresolved attributes.
     placeholder_field_indices: FxHashMap<ast::NodeId, usize>,
 }
@@ -509,11 +508,6 @@ impl Definitions {
     pub fn set_invocation_parent(&mut self, invoc_id: ExpnId, parent: LocalDefId) {
         let old_parent = self.invocation_parents.insert(invoc_id, parent);
         assert!(old_parent.is_none(), "parent `LocalDefId` is reset for an invocation");
-    }
-
-    pub fn set_invocation_def_index(&mut self, invoc_id: ExpnId, id: DefIndex) {
-        let old_index = self.invocation_def_indices.insert(invoc_id, id);
-        assert!(old_index.is_none(), "1DefIndex1 is reset for an invocation!");
     }
 
     pub fn placeholder_field_index(&self, node_id: ast::NodeId) -> usize {

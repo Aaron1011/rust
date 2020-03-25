@@ -27,14 +27,12 @@
 
 use crate::edition::Edition;
 use crate::symbol::{kw, sym, Symbol};
-use crate::{HashStableContext, GLOBALS};
+use crate::GLOBALS;
 use crate::{Span, DUMMY_SP};
 
 use crate::def_id::{DefId, LocalDefId, CRATE_DEF_INDEX};
 use log::*;
-use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::sync::{Lock, Lrc};
 use rustc_macros::HashStable_Generic;
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder, UseSpecializedDecodable};
