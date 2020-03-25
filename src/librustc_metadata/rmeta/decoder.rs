@@ -1721,13 +1721,6 @@ fn macro_kind(raw: &ProcMacro) -> MacroKind {
     }
 }
 
-/*impl<'a, 'tcx> SpecializedDecoder<CrossCrateHygieneData> for DecodeContext<'a, 'tcx> {
-    fn specialized_decode(&mut self) -> Result<CrossCrateHygieneData, Self::Error> {
-        rustc_span::hygiene::cross_crate_decode(self, &self.cdata().hygiene_context)?;
-        Ok(CrossCrateHygieneData)
-    }
-}*/
-
 impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for DecodeContext<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
         let cdata = self.cdata();
