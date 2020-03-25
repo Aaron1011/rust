@@ -44,7 +44,7 @@ use std::fmt;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable)]
 pub struct SyntaxContext(u32);
 
-#[derive(Debug, RustcEncodable, RustcDecodable, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, RustcEncodable, RustcDecodable, Clone)]
 pub struct SyntaxContextData {
     outer_expn: ExpnId,
     outer_transparency: Transparency,
@@ -706,7 +706,7 @@ impl Span {
 
 /// A subset of properties from both macro definition and macro call available through global data.
 /// Avoid using this if you have access to the original definition or call structures.
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable_Generic, Eq, PartialEq)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable_Generic)]
 pub struct ExpnData {
     // --- The part unique to each expansion.
     /// The kind of this expansion - macro or compiler desugaring.
@@ -788,7 +788,7 @@ impl ExpnData {
 }
 
 /// Expansion kind.
-#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable_Generic, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, RustcEncodable, RustcDecodable, HashStable_Generic)]
 pub enum ExpnKind {
     /// No expansion, aka root expansion. Only `ExpnId::root()` has this kind.
     Root,
@@ -852,7 +852,7 @@ impl MacroKind {
 }
 
 /// The kind of AST transform.
-#[derive(Clone, Copy, Debug, RustcEncodable, RustcDecodable, HashStable_Generic, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, RustcEncodable, RustcDecodable, HashStable_Generic)]
 pub enum AstPass {
     StdImports,
     TestHarness,
@@ -870,7 +870,7 @@ impl AstPass {
 }
 
 /// The kind of compiler desugaring.
-#[derive(Clone, Copy, PartialEq, Debug, RustcEncodable, RustcDecodable, HashStable_Generic, Eq)]
+#[derive(Clone, Copy, PartialEq, Debug, RustcEncodable, RustcDecodable, HashStable_Generic)]
 pub enum DesugaringKind {
     /// We desugar `if c { i } else { e }` to `match $ExprKind::Use(c) { true => i, _ => e }`.
     /// However, we do not want to blame `c` for unreachability but rather say that `i`
@@ -903,7 +903,6 @@ impl DesugaringKind {
     }
 }
 
-//impl UseSpecializedEncodable for ExpnId {}
 impl UseSpecializedDecodable for ExpnId {}
 
 impl Encodable for ExpnId {

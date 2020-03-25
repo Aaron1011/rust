@@ -245,13 +245,6 @@ impl<'sess> OnDiskCache<'sess> {
                 })
                 .collect::<Result<_, _>>()?;
 
-            // Encode hygiene data
-            /*let hygiene_index = {
-                let pos = AbsoluteBytePos::new(encoder.position());
-                CrossCrateHygieneData.encode(&mut encoder)?;
-                pos
-            };*/
-
             let interpret_alloc_index = {
                 let mut interpret_alloc_index = Vec::new();
                 let mut n = 0;
