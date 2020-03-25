@@ -18,7 +18,7 @@ use rustc_serialize::{
     UseSpecializedDecodable, UseSpecializedEncodable,
 };
 use rustc_session::{CrateDisambiguator, Session};
-use rustc_span::hygiene::{CrossCrateContext, ExpnId, SyntaxContext, SyntaxContextData};
+use rustc_span::hygiene::{ExpnId, HygieneContext, SyntaxContext, SyntaxContextData};
 use rustc_span::source_map::{SourceMap, StableSourceFileId};
 use rustc_span::CachingSourceMapView;
 use rustc_span::{BytePos, ExpnData, SourceFile, Span, DUMMY_SP};
@@ -68,7 +68,7 @@ pub struct OnDiskCache<'sess> {
 
     syntax_contexts: FxHashMap<u32, AbsoluteBytePos>,
     expn_data: FxHashMap<DefPathHash, AbsoluteBytePos>,
-    hygiene_context: CrossCrateContext,
+    hygiene_context: HygieneContext,
 }
 
 // This type is used only for serialization and deserialization.
@@ -143,7 +143,7 @@ impl<'sess> OnDiskCache<'sess> {
             alloc_decoding_state: AllocDecodingState::new(footer.interpret_alloc_index),
             syntax_contexts: footer.syntax_contexts,
             expn_data: footer.expn_data,
-            hygiene_context: CrossCrateContext::from_global_hygiene(),
+            hygiene_context: HygieneContext::new(),
         }
     }
 
@@ -161,7 +161,7 @@ impl<'sess> OnDiskCache<'sess> {
             alloc_decoding_state: AllocDecodingState::new(Vec::new()),
             syntax_contexts: FxHashMap::default(),
             expn_data: FxHashMap::default(),
-            hygiene_context: CrossCrateContext::from_global_hygiene(),
+            hygiene_context: HygieneContext::new(),
         }
     }
 
@@ -481,7 +481,7 @@ struct CacheDecoder<'a, 'tcx> {
     alloc_decoding_session: AllocDecodingSession<'a>,
     syntax_contexts: &'a FxHashMap<u32, AbsoluteBytePos>,
     expn_data: &'a FxHashMap<DefPathHash, AbsoluteBytePos>,
-    hygiene_context: &'a CrossCrateContext,
+    hygiene_context: &'a HygieneContext,
 }
 
 impl<'a, 'tcx> CacheDecoder<'a, 'tcx> {
@@ -605,17 +605,13 @@ implement_ty_decoder!(CacheDecoder<'a, 'tcx>);
 impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for CacheDecoder<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
         let syntax_contexts = self.syntax_contexts;
-        rustc_span::hygiene::cross_crate_decode_syntax_context(
-            self,
-            self.hygiene_context,
-            |this, id| {
-                let pos = syntax_contexts.get(&id).unwrap();
-                this.with_position(pos.to_usize(), |decoder| {
-                    let data: SyntaxContextData = decode_tagged(decoder, TAG_SYNTAX_CONTEXT)?;
-                    Ok(data)
-                })
-            },
-        )
+        rustc_span::hygiene::decode_syntax_context(self, self.hygiene_context, |this, id| {
+            let pos = syntax_contexts.get(&id).unwrap();
+            this.with_position(pos.to_usize(), |decoder| {
+                let data: SyntaxContextData = decode_tagged(decoder, TAG_SYNTAX_CONTEXT)?;
+                Ok(data)
+            })
+        })
     }
 }
 
@@ -623,7 +619,7 @@ impl<'a, 'tcx> SpecializedDecoder<ExpnId> for CacheDecoder<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<ExpnId, Self::Error> {
         let expn_data = self.expn_data;
         let tcx = self.tcx;
-        rustc_span::hygiene::cross_crate_decode_expn_id(self, |this, def_id| {
+        rustc_span::hygiene::decode_expn_id(self, |this, def_id| {
             let def_hash = tcx.def_path_hash(def_id);
             let pos = expn_data[&def_hash];
             this.with_position(pos.to_usize(), |decoder| {

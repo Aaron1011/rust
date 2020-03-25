@@ -45,7 +45,7 @@ use rustc_span::symbol::{sym, Symbol};
 use rustc_span::{self, hygiene::MacroKind, BytePos, ExpnId, Pos, Span, SyntaxContext, DUMMY_SP};
 
 pub use cstore_impl::{provide, provide_extern};
-use rustc_span::hygiene::CrossCrateContext;
+use rustc_span::hygiene::HygieneContext;
 
 mod cstore_impl;
 
@@ -113,7 +113,7 @@ crate struct CrateMetadata {
     /// If this is `None`, then the crate was injected (e.g., by the allocator).
     extern_crate: Lock<Option<ExternCrate>>,
 
-    hygiene_context: CrossCrateContext,
+    hygiene_context: HygieneContext,
 }
 
 /// Holds information about a rustc_span::SourceFile imported from another crate.
@@ -1587,7 +1587,7 @@ impl CrateMetadata {
             private_dep,
             host_hash,
             extern_crate: Lock::new(None),
-            hygiene_context: CrossCrateContext::from_global_hygiene(),
+            hygiene_context: HygieneContext::new(),
         }
     }
 
@@ -1725,14 +1725,10 @@ impl<'a, 'tcx> SpecializedDecoder<SyntaxContext> for DecodeContext<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<SyntaxContext, Self::Error> {
         let cdata = self.cdata();
         let sess = self.sess.unwrap();
-        rustc_span::hygiene::cross_crate_decode_syntax_context(
-            self,
-            &cdata.hygiene_context,
-            |_, id| {
-                debug!("SpecializedDecoder<SyntaxContext>: decoding {}", id);
-                Ok(cdata.root.syntax_contexts.get(&cdata, id).unwrap().decode((&cdata, sess)))
-            },
-        )
+        rustc_span::hygiene::decode_syntax_context(self, &cdata.hygiene_context, |_, id| {
+            debug!("SpecializedDecoder<SyntaxContext>: decoding {}", id);
+            Ok(cdata.root.syntax_contexts.get(&cdata, id).unwrap().decode((&cdata, sess)))
+        })
     }
 }
 
@@ -1740,7 +1736,7 @@ impl<'a, 'tcx> SpecializedDecoder<ExpnId> for DecodeContext<'a, 'tcx> {
     fn specialized_decode(&mut self) -> Result<ExpnId, Self::Error> {
         let local_cdata = self.cdata();
         let sess = self.sess.unwrap();
-        rustc_span::hygiene::cross_crate_decode_expn_id(self, |_, def_id| {
+        rustc_span::hygiene::decode_expn_id(self, |_, def_id| {
             let crate_data = if def_id.krate == LOCAL_CRATE {
                 local_cdata
             } else {

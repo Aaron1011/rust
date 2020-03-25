@@ -915,26 +915,23 @@ impl Encodable for ExpnId {
     }
 }
 
-pub struct CrossCrateContext {
+pub struct HygieneContext {
     remapped_ctxts: Lock<FxHashMap<u32, SyntaxContext>>,
 }
 
-impl CrossCrateContext {
-    pub fn from_global_hygiene() -> CrossCrateContext {
-        CrossCrateContext { remapped_ctxts: Lock::new(FxHashMap::default()) }
+impl HygieneContext {
+    pub fn new() -> HygieneContext {
+        HygieneContext { remapped_ctxts: Lock::new(FxHashMap::default()) }
     }
 }
 
-pub fn cross_crate_decode_expn_id<
-    D: Decoder,
-    F: FnOnce(&mut D, DefId) -> Result<ExpnData, D::Error>,
->(
+pub fn decode_expn_id<D: Decoder, F: FnOnce(&mut D, DefId) -> Result<ExpnData, D::Error>>(
     d: &mut D,
     decode_data: F,
 ) -> Result<ExpnId, D::Error> {
     let def_id: DefId = Decodable::decode(d)?;
     if def_id.index == CRATE_DEF_INDEX {
-        debug!("cross_crate_decode_expn_id: deserialized root");
+        debug!("decode_expn_id: deserialized root");
         return Ok(ExpnId::root());
     }
     let expn_id =
@@ -956,17 +953,17 @@ pub fn cross_crate_decode_expn_id<
     return Ok(expn_id);
 }
 
-pub fn cross_crate_decode_syntax_context<
+pub fn decode_syntax_context<
     D: Decoder,
     F: FnOnce(&mut D, u32) -> Result<SyntaxContextData, D::Error>,
 >(
     d: &mut D,
-    context: &CrossCrateContext,
+    context: &HygieneContext,
     decode_data: F,
 ) -> Result<SyntaxContext, D::Error> {
     let raw_id: u32 = Decodable::decode(d)?;
     if raw_id == 0 {
-        debug!("cross_crate_decode_syntax_context: deserialized root");
+        debug!("decode_syntax_context: deserialized root");
         // The root is special
         return Ok(SyntaxContext::root());
     }
