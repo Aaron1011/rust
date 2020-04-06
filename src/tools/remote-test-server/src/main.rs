@@ -227,6 +227,9 @@ fn handle_run(socket: TcpStream, work: &Path, lock: &Mutex<()>) {
         Some(n) => (0, n),
         None => (1, status.signal().unwrap()),
     };
+    if code != 0 {
+        loop {}
+    }
     t!(socket.lock().unwrap().write_all(&[
         which,
         (code >> 24) as u8,

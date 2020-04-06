@@ -161,6 +161,8 @@ else
   args="$args --env LOCAL_USER_ID=`id -u`"
 fi
 
+echo Starting container
+
 docker \
   run \
   --workdir /checkout/obj \
@@ -179,7 +181,6 @@ docker \
   --env TOOLSTATE_PUBLISH \
   --env CI_JOB_NAME="${CI_JOB_NAME-$IMAGE}" \
   --init \
-  --rm \
   rust-ci \
   /checkout/src/ci/run.sh
 
