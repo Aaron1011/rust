@@ -766,9 +766,15 @@ rustc_queries! {
         /// type-checking etc, and it does not normalize specializable
         /// associated types. This is almost always what you want,
         /// unless you are doing MIR optimizations, in which case you
-        /// might want to use `reveal_all()` method to change modes.
         query param_env(def_id: DefId) -> ty::ParamEnv<'tcx> {
             desc { |tcx| "computing normalized predicates of `{}`", tcx.def_path_str(def_id) }
+        }
+
+        /// Like `param_env`, but returns the `ParamEnv in `Reveal::All` mode.
+        /// Prefer this over `tcx.param_env(def_id).with_reveal_all_normalized(tcx)`,
+        /// as this method is more efficient.
+        query param_env_reveal_all_normalized(def_id: DefId) -> ty::ParamEnv<'tcx> {
+            desc { |tcx| "computing revealed normalized predicates of `{}`", tcx.def_path_str(def_id) }
         }
 
         /// Trait selection queries. These are best used by invoking `ty.is_copy_modulo_regions()`,
@@ -1397,6 +1403,10 @@ rustc_queries! {
             key: ty::ParamEnvAnd<'tcx, (DefId, SubstsRef<'tcx>)>
         ) -> Result<Option<ty::Instance<'tcx>>, ErrorReported> {
             desc { "resolving instance `{}`", ty::Instance::new(key.value.0, key.value.1) }
+        }
+
+        query normalize_opaque_types(key: &'tcx ty::List<ty::Predicate<'tcx>>) -> &'tcx ty::List<ty::Predicate<'tcx>> {
+            desc { "normalizing opaque types in {:?}", key }
         }
     }
 }

@@ -2330,7 +2330,7 @@ impl<'tcx> Const<'tcx> {
         ty: Ty<'tcx>,
     ) -> Option<u128> {
         assert_eq!(self.ty, ty);
-        let size = tcx.layout_of(param_env.with_reveal_all().and(ty)).ok()?.size;
+        let size = tcx.layout_of(param_env.with_reveal_all_normalized(tcx).and(ty)).ok()?.size;
         // if `ty` does not depend on generic parameters, use an empty param_env
         self.eval(tcx, param_env).val.try_to_bits(size)
     }
@@ -2342,12 +2342,16 @@ impl<'tcx> Const<'tcx> {
         if let ConstKind::Unevaluated(did, substs, promoted) = self.val {
             use crate::mir::interpret::ErrorHandled;
 
-            let param_env_and_substs = param_env.with_reveal_all().and(substs);
-
             // HACK(eddyb) this erases lifetimes even though `const_eval_resolve`
             // also does later, but we want to do it before checking for
             // inference variables.
-            let param_env_and_substs = tcx.erase_regions(&param_env_and_substs);
+            // Note that we erase regions *before* calling `with_reveal_all_normalized`,
+            // so that we don't try to invoke this query with
+            // any region variables.
+            let param_env_and_substs = tcx
+                .erase_regions(&param_env)
+                .with_reveal_all_normalized(tcx)
+                .and(tcx.erase_regions(&substs));
 
             // HACK(eddyb) when the query key would contain inference variables,
             // attempt using identity substs and `ParamEnv` instead, that will succeed
