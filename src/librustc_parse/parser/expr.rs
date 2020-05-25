@@ -4,7 +4,6 @@ use super::{BlockMode, Parser, PathStyle, Restrictions, TokenType};
 use super::{SemiColonMode, SeqSep, TokenExpectType};
 use crate::maybe_recover_from_interpolated_ty_qpath;
 
-use log::debug;
 use rustc_ast::ast::{self, AttrStyle, AttrVec, CaptureBy, Field, Lit, UnOp, DUMMY_NODE_ID};
 use rustc_ast::ast::{AnonConst, BinOp, BinOpKind, FnDecl, FnRetTy, MacCall, Param, Ty, TyKind};
 use rustc_ast::ast::{Arm, Async, BlockCheckMode, Expr, ExprKind, Label, Movability, RangeLimits};
@@ -1000,21 +999,6 @@ impl<'a> Parser<'a> {
             }
         } else {
             self.parse_lit_expr(attrs)
-        }
-    }
-
-    fn maybe_collect_tokens(
-        &mut self,
-        has_outer_attrs: bool,
-        f: impl FnOnce(&mut Self) -> PResult<'a, P<Expr>>,
-    ) -> PResult<'a, P<Expr>> {
-        if has_outer_attrs {
-            let (mut expr, tokens) = self.collect_tokens(f)?;
-            debug!("maybe_collect_tokens: Collected tokens for {:?} (tokens {:?}", expr, tokens);
-            expr.tokens = Some(tokens);
-            Ok(expr)
-        } else {
-            f(self)
         }
     }
 

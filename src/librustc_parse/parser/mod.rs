@@ -14,7 +14,7 @@ use crate::lexer::UnmatchedBrace;
 
 use log::debug;
 use rustc_ast::ast::DUMMY_NODE_ID;
-use rustc_ast::ast::{self, AttrStyle, AttrVec, Const, CrateSugar, Extern, Unsafe};
+use rustc_ast::ast::{self, AttrStyle, AttrVec, Const, CrateSugar, Extern, Unsafe, Expr, Stmt};
 use rustc_ast::ast::{
     Async, MacArgs, MacDelimiter, Mutability, StrLit, Visibility, VisibilityKind,
 };
@@ -29,6 +29,7 @@ use rustc_span::source_map::{respan, Span, DUMMY_SP};
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 
 use std::{cmp, mem, slice};
+use std::fmt::Debug;
 
 bitflags::bitflags! {
     struct Restrictions: u8 {
@@ -49,6 +50,38 @@ enum BlockMode {
     Break,
     Ignore,
 }
+
+trait SetTokens {
+    fn set_tokens(&mut self, tokens: TokenStream);
+}
+
+impl SetTokens for Expr {
+    fn set_tokens(&mut self, tokens: TokenStream) {
+        self.tokens = Some(tokens)
+    }
+}
+
+impl<T: SetTokens> SetTokens for P<T> {
+    fn set_tokens(&mut self, tokens: TokenStream) {
+        let inner: &mut T = &mut *self;
+        inner.set_tokens(tokens)
+    }
+}
+
+impl<T: SetTokens> SetTokens for Option<T> {
+    fn set_tokens(&mut self, tokens: TokenStream) {
+        if let Some(inner) = self.as_mut() {
+            inner.set_tokens(tokens)
+        }
+    }
+}
+
+impl SetTokens for Stmt {
+    fn set_tokens(&mut self, tokens: TokenStream) {
+        self.tokens = Some(tokens)
+    }
+}
+
 
 /// Like `maybe_whole_expr`, but for things other than expressions.
 #[macro_export]
@@ -1112,6 +1145,21 @@ impl<'a> Parser<'a> {
                 }
             },
             Err(None) => None,
+        }
+    }
+
+    fn maybe_collect_tokens<T: SetTokens + Debug>(
+        &mut self,
+        has_outer_attrs: bool,
+        f: impl FnOnce(&mut Self) -> PResult<'a, T>,
+    ) -> PResult<'a, T> {
+        if has_outer_attrs {
+            let (mut val, tokens) = self.collect_tokens(f)?;
+            debug!("maybe_collect_tokens: Collected tokens for {:?} (tokens {:?}", val, tokens);
+            val.set_tokens(tokens);
+            Ok(val)
+        } else {
+            f(self)
         }
     }
 

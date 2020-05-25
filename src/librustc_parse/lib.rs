@@ -278,6 +278,9 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
             }
             prepend_attrs(sess, &expr.attrs, expr.tokens.as_ref(), span)
         }
+        Nonterminal::NtStmt(ref stmt) => {
+            prepend_attrs(sess, &stmt.attrs, stmt.tokens.as_ref(), span)
+        }
         _ => None,
     };
 

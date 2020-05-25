@@ -91,7 +91,7 @@ pub fn placeholder(
         }
         AstFragmentKind::Stmts => AstFragment::Stmts(smallvec![{
             let mac = P((mac_placeholder(), ast::MacStmtStyle::Braces, ast::AttrVec::new()));
-            ast::Stmt { id, span, kind: ast::StmtKind::MacCall(mac) }
+            ast::Stmt { id, span, kind: ast::StmtKind::MacCall(mac), tokens: None }
         }]),
         AstFragmentKind::Arms => AstFragment::Arms(smallvec![ast::Arm {
             attrs: Default::default(),
