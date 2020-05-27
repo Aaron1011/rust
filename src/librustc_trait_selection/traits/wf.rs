@@ -2,10 +2,12 @@ use crate::infer::InferCtxt;
 use crate::opaque_types::required_region_bounds;
 use crate::traits;
 use rustc_hir as hir;
+use rustc_hir::CRATE_HIR_ID;
+use rustc_span::DUMMY_SP;
 use rustc_hir::def_id::DefId;
 use rustc_hir::lang_items;
 use rustc_middle::ty::subst::{GenericArgKind, SubstsRef};
-use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable, WithConstness};
+use rustc_middle::ty::{self, ToPredicate, Ty, TyCtxt, TypeFoldable, WithConstness, TraitRef};
 use rustc_span::Span;
 use std::rc::Rc;
 
@@ -56,9 +58,10 @@ pub fn trait_obligations<'a, 'tcx>(
     trait_ref: &ty::TraitRef<'tcx>,
     span: Span,
     item: Option<&'tcx hir::Item<'tcx>>,
+    push_wf_self: bool
 ) -> Vec<traits::PredicateObligation<'tcx>> {
     let mut wf = WfPredicates { infcx, param_env, body_id, span, out: vec![], item };
-    wf.compute_trait_ref(trait_ref, Elaborate::All);
+    wf.compute_trait_ref(trait_ref, Elaborate::All, push_wf_self);
     wf.normalize()
 }
 
@@ -74,7 +77,7 @@ pub fn predicate_obligations<'a, 'tcx>(
     // (*) ok to skip binders, because wf code is prepared for it
     match predicate.kind() {
         ty::PredicateKind::Trait(t, _) => {
-            wf.compute_trait_ref(&t.skip_binder().trait_ref, Elaborate::None); // (*)
+            wf.compute_trait_ref(&t.skip_binder().trait_ref, Elaborate::None, true); // (*)
         }
         ty::PredicateKind::RegionOutlives(..) => {}
         ty::PredicateKind::TypeOutlives(t) => {
@@ -241,7 +244,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
     }
 
     /// Pushes the obligations required for `trait_ref` to be WF into `self.out`.
-    fn compute_trait_ref(&mut self, trait_ref: &ty::TraitRef<'tcx>, elaborate: Elaborate) {
+    fn compute_trait_ref(&mut self, trait_ref: &ty::TraitRef<'tcx>, elaborate: Elaborate, push_wf_self: bool) {
         let tcx = self.infcx.tcx;
         let obligations = self.nominal_obligations(trait_ref.def_id, trait_ref.substs);
 
@@ -280,15 +283,17 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
         }
 
         let tcx = self.tcx();
-        self.out.extend(trait_ref.substs.types().filter(|ty| !ty.has_escaping_bound_vars()).map(
-            |ty| {
-                traits::Obligation::new(
-                    cause.clone(),
-                    param_env,
-                    ty::PredicateKind::WellFormed(ty).to_predicate(tcx),
-                )
-            },
-        ));
+        if push_wf_self {
+            self.out.extend(trait_ref.substs.types().filter(|ty| !ty.has_escaping_bound_vars()).map(
+                |ty| {
+                    traits::Obligation::new(
+                        cause.clone(),
+                        param_env,
+                        ty::PredicateKind::WellFormed(ty).to_predicate(tcx),
+                    )
+                },
+            ));
+        }
     }
 
     /// Pushes the obligations required for `trait_ref::Item` to be WF
@@ -298,7 +303,7 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
         // WF and (b) the trait-ref holds.  (It may also be
         // normalizable and be WF that way.)
         let trait_ref = data.trait_ref(self.infcx.tcx);
-        self.compute_trait_ref(&trait_ref, Elaborate::None);
+        self.compute_trait_ref(&trait_ref, Elaborate::None, true);
 
         if !data.has_escaping_bound_vars() {
             let predicate = trait_ref.without_const().to_predicate(self.infcx.tcx);
@@ -501,6 +506,23 @@ impl<'a, 'tcx> WfPredicates<'a, 'tcx> {
                     // Here, we defer WF checking due to higher-ranked
                     // regions. This is perhaps not ideal.
                     self.from_object_ty(ty, data, r);
+
+                    if let Some(trait_ref) = data.principal() {
+                        let new_trait_ref = trait_ref.with_self_ty(self.tcx(), ty);
+                        //let new_substs = self.tcx().mk_substs_trait(ty, trait_ref.substs.into());
+                        //let new_trait_ref = TraitRef::new(trait_ref.def_id(), new_substs);
+                        let cause = self.cause(traits::MiscObligation);
+
+                        debug!("WfPredicates::compute: expanding `dyn` pred {:?}", new_trait_ref);
+
+                        if let Some(new_trait_ref) = new_trait_ref.no_bound_vars() {
+                            let preds = trait_obligations(self.infcx, param_env, self.body_id,
+                                             &new_trait_ref, DUMMY_SP, None, false);
+
+
+                            self.out.extend(preds);
+                        }
+                    }
 
                     // FIXME(#27579) RFC also considers adding trait
                     // obligations that don't refer to Self and

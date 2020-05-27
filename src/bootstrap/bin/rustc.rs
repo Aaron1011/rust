@@ -102,6 +102,10 @@ fn main() {
             cmd.arg("-C").arg("panic=abort");
         }
 
+        if crate_name == Some("core") {
+            cmd.arg("-Z").arg("treat-err-as-bug=1");
+        }
+
         // Set various options from config.toml to configure how we're building
         // code.
         let debug_assertions = match env::var("RUSTC_DEBUG_ASSERTIONS") {

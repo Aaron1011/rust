@@ -641,6 +641,7 @@ fn check_impl<'tcx>(
                     &trait_ref,
                     ast_trait_ref.path.span,
                     Some(item),
+                    true
                 );
                 for obligation in obligations {
                     fcx.register_predicate(obligation);
