@@ -84,9 +84,16 @@ impl From<P<Expr>> for LhsExpr {
 }
 
 impl<'a> Parser<'a> {
+
+    #[inline]
+    pub fn do_parse_expr(&mut self) -> PResult<'a, P<Expr>> {
+        self.reset_force_capture();
+        self.parse_expr()
+    }
+
     /// Parses an expression.
     #[inline]
-    pub fn parse_expr(&mut self) -> PResult<'a, P<Expr>> {
+    crate fn parse_expr(&mut self) -> PResult<'a, P<Expr>> {
         self.parse_expr_res(Restrictions::empty(), None)
     }
 
@@ -432,7 +439,8 @@ impl<'a> Parser<'a> {
     /// Parses a prefix-unary-operator expr.
     fn parse_prefix_expr(&mut self, attrs: Option<AttrVec>) -> PResult<'a, P<Expr>> {
         let attrs = self.parse_or_use_outer_attributes(attrs)?;
-        self.maybe_collect_tokens(!attrs.is_empty(), |this| {
+        let force_capture = self.force_capture();
+        self.maybe_collect_tokens(!attrs.is_empty() || force_capture, |this| {
             let lo = this.token.span;
             // Note: when adding new unary operators, don't forget to adjust TokenKind::can_begin_expr()
             let (hi, ex) = match this.token.uninterpolate().kind {

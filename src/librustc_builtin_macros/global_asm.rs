@@ -55,7 +55,7 @@ fn parse_global_asm<'a>(
         return Err(err);
     }
 
-    let expr = p.parse_expr()?;
+    let expr = p.do_parse_expr()?;
     let (asm, _) = match expr_to_string(cx, expr, "inline assembly must be a string literal") {
         Some((s, st)) => (s, st),
         None => return Ok(None),

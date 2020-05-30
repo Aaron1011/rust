@@ -867,7 +867,7 @@ fn parse_nt(p: &mut Parser<'_>, sp: Span, name: Symbol) -> Result<Nonterminal, (
 
 fn parse_nt_inner<'a>(p: &mut Parser<'a>, sp: Span, name: Symbol) -> PResult<'a, Nonterminal> {
     Ok(match name {
-        sym::item => match p.parse_item()? {
+        sym::item => match p.do_parse_item()? {
             Some(i) => token::NtItem(i),
             None => return Err(p.struct_span_err(p.token.span, "expected an item keyword")),
         },
@@ -877,7 +877,7 @@ fn parse_nt_inner<'a>(p: &mut Parser<'a>, sp: Span, name: Symbol) -> PResult<'a,
             None => return Err(p.struct_span_err(p.token.span, "expected a statement")),
         },
         sym::pat => token::NtPat(p.parse_pat(None)?),
-        sym::expr => token::NtExpr(p.parse_expr()?),
+        sym::expr => token::NtExpr(p.do_parse_expr()?),
         sym::literal => token::NtLiteral(p.parse_literal_maybe_minus()?),
         sym::ty => token::NtTy(p.parse_ty()?),
         // this could be handled like a token, since it is one

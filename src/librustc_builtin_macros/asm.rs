@@ -50,7 +50,7 @@ fn parse_args<'a>(
         return Err(err);
     }
 
-    let template = p.parse_expr()?;
+    let template = p.do_parse_expr()?;
     let mut args = AsmArgs {
         template,
         operands: vec![],
@@ -100,42 +100,42 @@ fn parse_args<'a>(
         let mut explicit_reg = false;
         let op = if p.eat(&token::Ident(kw::In, false)) {
             let reg = parse_reg(&mut p, &mut explicit_reg)?;
-            let expr = p.parse_expr()?;
+            let expr = p.do_parse_expr()?;
             ast::InlineAsmOperand::In { reg, expr }
         } else if p.eat(&token::Ident(sym::out, false)) {
             let reg = parse_reg(&mut p, &mut explicit_reg)?;
-            let expr = if p.eat_keyword(kw::Underscore) { None } else { Some(p.parse_expr()?) };
+            let expr = if p.eat_keyword(kw::Underscore) { None } else { Some(p.do_parse_expr()?) };
             ast::InlineAsmOperand::Out { reg, expr, late: false }
         } else if p.eat(&token::Ident(sym::lateout, false)) {
             let reg = parse_reg(&mut p, &mut explicit_reg)?;
-            let expr = if p.eat_keyword(kw::Underscore) { None } else { Some(p.parse_expr()?) };
+            let expr = if p.eat_keyword(kw::Underscore) { None } else { Some(p.do_parse_expr()?) };
             ast::InlineAsmOperand::Out { reg, expr, late: true }
         } else if p.eat(&token::Ident(sym::inout, false)) {
             let reg = parse_reg(&mut p, &mut explicit_reg)?;
-            let expr = p.parse_expr()?;
+            let expr = p.do_parse_expr()?;
             if p.eat(&token::FatArrow) {
                 let out_expr =
-                    if p.eat_keyword(kw::Underscore) { None } else { Some(p.parse_expr()?) };
+                    if p.eat_keyword(kw::Underscore) { None } else { Some(p.do_parse_expr()?) };
                 ast::InlineAsmOperand::SplitInOut { reg, in_expr: expr, out_expr, late: false }
             } else {
                 ast::InlineAsmOperand::InOut { reg, expr, late: false }
             }
         } else if p.eat(&token::Ident(sym::inlateout, false)) {
             let reg = parse_reg(&mut p, &mut explicit_reg)?;
-            let expr = p.parse_expr()?;
+            let expr = p.do_parse_expr()?;
             if p.eat(&token::FatArrow) {
                 let out_expr =
-                    if p.eat_keyword(kw::Underscore) { None } else { Some(p.parse_expr()?) };
+                    if p.eat_keyword(kw::Underscore) { None } else { Some(p.do_parse_expr()?) };
                 ast::InlineAsmOperand::SplitInOut { reg, in_expr: expr, out_expr, late: true }
             } else {
                 ast::InlineAsmOperand::InOut { reg, expr, late: true }
             }
         } else if p.eat(&token::Ident(kw::Const, false)) {
-            let expr = p.parse_expr()?;
+            let expr = p.do_parse_expr()?;
             ast::InlineAsmOperand::Const { expr }
         } else {
             p.expect(&token::Ident(sym::sym, false))?;
-            let expr = p.parse_expr()?;
+            let expr = p.do_parse_expr()?;
             match expr.kind {
                 ast::ExprKind::Path(..) => {}
                 _ => {

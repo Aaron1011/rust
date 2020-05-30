@@ -72,7 +72,7 @@ fn parse_assert<'a>(
         return Err(err);
     }
 
-    let cond_expr = parser.parse_expr()?;
+    let cond_expr = parser.do_parse_expr()?;
 
     // Some crates use the `assert!` macro in the following form (note extra semicolon):
     //

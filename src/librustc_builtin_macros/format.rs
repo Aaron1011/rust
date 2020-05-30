@@ -133,7 +133,7 @@ fn parse_args<'a>(
         return Err(ecx.struct_span_err(sp, "requires at least a format string argument"));
     }
 
-    let fmtstr = p.parse_expr()?;
+    let fmtstr = p.do_parse_expr()?;
     let mut first = true;
     let mut named = false;
 
@@ -159,7 +159,7 @@ fn parse_args<'a>(
                 named = true;
                 p.bump();
                 p.expect(&token::Eq)?;
-                let e = p.parse_expr()?;
+                let e = p.do_parse_expr()?;
                 if let Some(prev) = names.get(&ident.name) {
                     ecx.struct_span_err(e.span, &format!("duplicate argument named `{}`", ident))
                         .span_label(args[*prev].span, "previously here")
@@ -177,7 +177,7 @@ fn parse_args<'a>(
                 args.push(e);
             }
             _ => {
-                let e = p.parse_expr()?;
+                let e = p.do_parse_expr()?;
                 if named {
                     let mut err = ecx.struct_span_err(
                         e.span,

@@ -140,7 +140,7 @@ pub fn expand_include<'cx>(
         fn make_items(mut self: Box<ExpandResult<'a>>) -> Option<SmallVec<[P<ast::Item>; 1]>> {
             let mut ret = SmallVec::new();
             while self.p.token != token::Eof {
-                match self.p.parse_item() {
+                match self.p.do_parse_item() {
                     Err(mut err) => {
                         err.emit();
                         break;

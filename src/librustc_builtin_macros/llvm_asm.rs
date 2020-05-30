@@ -126,7 +126,7 @@ fn parse_inline_asm<'a>(
                     return Err(err);
                 }
 
-                let expr = p2.parse_expr()?;
+                let expr = p2.do_parse_expr()?;
                 let (s, style) =
                     match expr_to_string(cx, expr, "inline assembly must be a string literal") {
                         Some((s, st)) => (s, st),
@@ -154,7 +154,7 @@ fn parse_inline_asm<'a>(
                     let span = p.prev_token.span;
 
                     p.expect(&token::OpenDelim(token::Paren))?;
-                    let expr = p.parse_expr()?;
+                    let expr = p.do_parse_expr()?;
                     p.expect(&token::CloseDelim(token::Paren))?;
 
                     // Expands a read+write operand into two operands.
@@ -218,7 +218,7 @@ fn parse_inline_asm<'a>(
                     }
 
                     p.expect(&token::OpenDelim(token::Paren))?;
-                    let input = p.parse_expr()?;
+                    let input = p.do_parse_expr()?;
                     p.expect(&token::CloseDelim(token::Paren))?;
 
                     inputs.push((constraint, input));

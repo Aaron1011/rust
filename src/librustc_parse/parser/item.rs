@@ -82,7 +82,13 @@ impl<'a> Parser<'a> {
 pub(super) type ItemInfo = (Ident, ItemKind);
 
 impl<'a> Parser<'a> {
-    pub fn parse_item(&mut self) -> PResult<'a, Option<P<Item>>> {
+
+    pub fn do_parse_item(&mut self) -> PResult<'a, Option<P<Item>>>  {
+        self.reset_force_capture();
+        self.parse_item()
+    }
+
+    fn parse_item(&mut self) -> PResult<'a, Option<P<Item>>> {
         self.parse_item_(|_| true).map(|i| i.map(P))
     }
 
@@ -113,7 +119,7 @@ impl<'a> Parser<'a> {
             item
         };
 
-        let (mut item, tokens) = if has_attrs {
+        let (mut item, tokens) = if has_attrs || self.force_capture() {
             let (item, tokens) = self.collect_tokens(parse_item)?;
             (item, Some(tokens))
         } else {

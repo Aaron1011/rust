@@ -877,7 +877,7 @@ pub fn parse_ast_fragment<'a>(
     Ok(match kind {
         AstFragmentKind::Items => {
             let mut items = SmallVec::new();
-            while let Some(item) = this.parse_item()? {
+            while let Some(item) = this.do_parse_item()? {
                 items.push(item);
             }
             AstFragment::Items(items)
@@ -913,10 +913,10 @@ pub fn parse_ast_fragment<'a>(
             }
             AstFragment::Stmts(stmts)
         }
-        AstFragmentKind::Expr => AstFragment::Expr(this.parse_expr()?),
+        AstFragmentKind::Expr => AstFragment::Expr(this.do_parse_expr()?),
         AstFragmentKind::OptExpr => {
             if this.token != token::Eof {
-                AstFragment::OptExpr(Some(this.parse_expr()?))
+                AstFragment::OptExpr(Some(this.do_parse_expr()?))
             } else {
                 AstFragment::OptExpr(None)
             }

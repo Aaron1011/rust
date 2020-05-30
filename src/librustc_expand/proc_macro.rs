@@ -124,7 +124,7 @@ impl MultiItemModifier for ProcMacroDerive {
         let mut items = vec![];
 
         loop {
-            match parser.parse_item() {
+            match parser.do_parse_item() {
                 Ok(None) => break,
                 Ok(Some(item)) => items.push(Annotatable::Item(item)),
                 Err(mut err) => {
