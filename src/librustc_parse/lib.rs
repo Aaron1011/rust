@@ -281,6 +281,10 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
             prepend_attrs(sess, &expr.attrs, expr.tokens.as_ref(), span)
         }
         Nonterminal::NtLiteral(ref expr) => expr.tokens.clone(),
+        Nonterminal::NtMeta(ref attrs) => {
+            debug!("no tokens for NtMeta: {:?}", attrs);
+            None
+        }
         _ => {
             debug!("no tokens implemented for {:?}", nt);
             None
@@ -316,7 +320,7 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
     // modifications, including adding/removing typically non-semantic
     // tokens such as extra braces and commas, don't happen.
     if let Some(tokens) = tokens {
-        if tokenstream_probably_equal_for_proc_macro(&tokens, &tokens_for_real, sess) {
+        if tokenstream_probably_equal_for_proc_macro(tokens.clone(), tokens_for_real.clone(), sess) {
             return tokens;
         }
         info!(
@@ -392,7 +396,7 @@ fn prepend_attrs(
     Some(builder.build())
 }
 
-fn expand_stream<'a>(stream: &'a TokenStream, sess: &'a ParseSess) -> impl Iterator<Item = TokenTree> + 'a {
+fn expand_stream<'a>(stream: TokenStream, sess: &'a ParseSess) -> impl Iterator<Item = TokenTree> + 'a {
     // When checking for `probably_eq`, we ignore certain tokens that aren't
     // preserved in the AST. Because they are not preserved, the pretty
     // printer arbitrarily adds or removes them when printing as token
@@ -486,11 +490,11 @@ fn expand_stream<'a>(stream: &'a TokenStream, sess: &'a ParseSess) -> impl Itera
         token_trees.into_iter()
     }
 
-    let expand_nt = move |tree: TokenTree| {
+    let expand_nt = move |tree: TokenTree| -> Box<dyn Iterator<Item = TokenTree>> {
         if let TokenTree::Token(Token { kind: TokenKind::Interpolated(nt), span }) = &tree {
-            nt_to_tokenstream(nt, sess, *span).into_trees()
+            Box::new(expand_stream(nt_to_tokenstream(nt, sess, *span), sess))
         } else {
-            TokenStream::new(vec![(tree, IsJoint::NonJoint)]).into_trees()
+            Box::new(TokenStream::new(vec![(tree, IsJoint::NonJoint)]).into_trees())
         }
     };
     // Break tokens after we expand any nonterminals, so that we break tokens
@@ -504,15 +508,15 @@ fn expand_stream<'a>(stream: &'a TokenStream, sess: &'a ParseSess) -> impl Itera
 // This is otherwise the same as `eq_unspanned`, only recursing with a
 // different method.
 pub fn tokenstream_probably_equal_for_proc_macro(
-    first: &TokenStream,
-    other: &TokenStream,
+    first: TokenStream,
+    other: TokenStream,
     sess: &ParseSess,
 ) -> bool {
 
     let mut t1 = expand_stream(first, sess); 
     let mut t2 = expand_stream(other, sess); 
     for (t1, t2) in t1.by_ref().zip(t2.by_ref()) {
-        if !tokentree_probably_equal_for_proc_macro(&t1, &t2, sess) {
+        if !tokentree_probably_equal_for_proc_macro(t1, t2, sess) {
             return false;
         }
     }
@@ -590,19 +594,19 @@ crate fn token_probably_equal_for_proc_macro(first: &Token, other: &Token) -> bo
 // This is otherwise the same as `eq_unspanned`, only recursing with a
 // different method.
 pub fn tokentree_probably_equal_for_proc_macro(
-    first: &TokenTree,
-    other: &TokenTree,
+    first: TokenTree,
+    other: TokenTree,
     sess: &ParseSess,
 ) -> bool {
     match (first, other) {
         (TokenTree::Token(token), TokenTree::Token(token2)) => {
-            token_probably_equal_for_proc_macro(token, token2)
+            token_probably_equal_for_proc_macro(&token, &token2)
         }
         (TokenTree::Delimited(_, delim, tts), TokenTree::Delimited(_, delim2, tts2)) => {
-            delim == delim2 && tokenstream_probably_equal_for_proc_macro(&tts, &tts2, sess)
+            delim == delim2 && tokenstream_probably_equal_for_proc_macro(tts, tts2, sess)
         }
-        _ => {
-            debug!("tokentree_probably_equal_for_proc_macro: mismatch: first {:?} other {:?}", first, other);
+        val @ _ => {
+            debug!("tokentree_probably_equal_for_proc_macro: mismatch: first {:?} other {:?}", val.0, val.1);
             false
         }
     }
