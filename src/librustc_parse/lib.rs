@@ -479,6 +479,9 @@ pub fn tokenstream_probably_equal_for_proc_macro(
             if token_trees.len() != 1 {
                 debug!("break_tokens: broke {:?} to {:?}", tree, token_trees);
             }
+        } else if let TokenTree::Delimited(_, DelimToken::NoDelim, nested) = tree {
+            token_trees = SmallVec::new();
+            token_trees.extend(nested.into_trees())
         } else {
             token_trees = SmallVec::new();
             token_trees.push(tree);
