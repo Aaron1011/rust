@@ -1410,25 +1410,33 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn do_parse_literal_maybe_minus(&mut self) -> PResult<'a, P<Expr>> {
+        self.reset_force_capture();
+        self.parse_literal_maybe_minus()
+    }
+
     /// Matches `'-' lit | lit` (cf. `ast_validation::AstValidator::check_expr_within_pat`).
     /// Keep this in sync with `Token::can_begin_literal_maybe_minus`.
     pub fn parse_literal_maybe_minus(&mut self) -> PResult<'a, P<Expr>> {
         maybe_whole_expr!(self);
 
-        let lo = self.token.span;
-        let minus_present = self.eat(&token::BinOp(token::Minus));
-        let lit = self.parse_lit()?;
-        let expr = self.mk_expr(lit.span, ExprKind::Lit(lit), AttrVec::new());
+        let force_capture = self.force_capture();
+        self.maybe_collect_tokens(force_capture, |this| {
+            let lo = this.token.span;
+            let minus_present = this.eat(&token::BinOp(token::Minus));
+            let lit = this.parse_lit()?;
+            let expr = this.mk_expr(lit.span, ExprKind::Lit(lit), AttrVec::new());
 
-        if minus_present {
-            Ok(self.mk_expr(
-                lo.to(self.prev_token.span),
-                self.mk_unary(UnOp::Neg, expr),
-                AttrVec::new(),
-            ))
-        } else {
-            Ok(expr)
-        }
+            if minus_present {
+                Ok(this.mk_expr(
+                    lo.to(this.prev_token.span),
+                    this.mk_unary(UnOp::Neg, expr),
+                    AttrVec::new(),
+                ))
+            } else {
+                Ok(expr)
+            }
+        })
     }
 
     /// Parses a block or unsafe block.
