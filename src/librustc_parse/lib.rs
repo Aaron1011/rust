@@ -278,7 +278,11 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
             }
             prepend_attrs(sess, &expr.attrs, expr.tokens.as_ref(), span)
         }
-        _ => None,
+        Nonterminal::NtLiteral(ref expr) => expr.tokens.clone(),
+        _ => {
+            debug!("no tokens implemented for {:?}", nt);
+            None
+        }
     };
 
     // FIXME(#43081): Avoid this pretty-print + reparse hack
@@ -515,9 +519,10 @@ crate fn token_probably_equal_for_proc_macro(first: &Token, other: &Token) -> bo
     use TokenKind::*;
 
     if mem::discriminant(&first.kind) != mem::discriminant(&other.kind) {
+        debug!("token_probably_equal_for_proc_macro: kind mismatch: first {:?} other {:?}", first, other);
         return false;
     }
-    match (&first.kind, &other.kind) {
+    let res = match (&first.kind, &other.kind) {
         (&Eq, &Eq)
         | (&Lt, &Lt)
         | (&Le, &Le)
@@ -565,7 +570,12 @@ crate fn token_probably_equal_for_proc_macro(first: &Token, other: &Token) -> bo
         (&Interpolated(_), &Interpolated(_)) => unreachable!(),
 
         _ => panic!("forgot to add a token?"),
+    };
+    if !res {
+        debug!("token_probably_equal_for_proc_macro: mismatch: first {:?} other {:?}", first, other);
     }
+    res
+
 }
 
 // See comments in `Nonterminal::to_tokenstream` for why we care about
@@ -585,6 +595,9 @@ pub fn tokentree_probably_equal_for_proc_macro(
         (TokenTree::Delimited(_, delim, tts), TokenTree::Delimited(_, delim2, tts2)) => {
             delim == delim2 && tokenstream_probably_equal_for_proc_macro(&tts, &tts2, sess)
         }
-        _ => false,
+        _ => {
+            debug!("tokentree_probably_equal_for_proc_macro: mismatch: first {:?} other {:?}", first, other);
+            false
+        }
     }
 }
