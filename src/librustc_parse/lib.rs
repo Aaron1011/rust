@@ -275,6 +275,8 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
         Nonterminal::NtExpr(ref expr) => {
             if expr.tokens.is_none() {
                 debug!("missing tokens for expr {:?}", expr);
+            } else {
+                debug!("expr tokens: {:?}", expr.tokens)
             }
             prepend_attrs(sess, &expr.attrs, expr.tokens.as_ref(), span)
         }
@@ -390,16 +392,7 @@ fn prepend_attrs(
     Some(builder.build())
 }
 
-// See comments in `Nonterminal::to_tokenstream` for why we care about
-// *probably* equal here rather than actual equality
-//
-// This is otherwise the same as `eq_unspanned`, only recursing with a
-// different method.
-pub fn tokenstream_probably_equal_for_proc_macro(
-    first: &TokenStream,
-    other: &TokenStream,
-    sess: &ParseSess,
-) -> bool {
+fn expand_stream<'a>(stream: &'a TokenStream, sess: &'a ParseSess) -> impl Iterator<Item = TokenTree> + 'a {
     // When checking for `probably_eq`, we ignore certain tokens that aren't
     // preserved in the AST. Because they are not preserved, the pretty
     // printer arbitrarily adds or removes them when printing as token
@@ -493,18 +486,31 @@ pub fn tokenstream_probably_equal_for_proc_macro(
         token_trees.into_iter()
     }
 
-    let expand_nt = |tree: TokenTree| {
+    let expand_nt = move |tree: TokenTree| {
         if let TokenTree::Token(Token { kind: TokenKind::Interpolated(nt), span }) = &tree {
             nt_to_tokenstream(nt, sess, *span).into_trees()
         } else {
             TokenStream::new(vec![(tree, IsJoint::NonJoint)]).into_trees()
         }
     };
-
     // Break tokens after we expand any nonterminals, so that we break tokens
     // that are produced as a result of nonterminal expansion.
-    let mut t1 = first.trees().filter(semantic_tree).flat_map(expand_nt).flat_map(break_tokens);
-    let mut t2 = other.trees().filter(semantic_tree).flat_map(expand_nt).flat_map(break_tokens);
+    stream.trees().filter(semantic_tree).flat_map(expand_nt).flat_map(break_tokens)
+}
+
+// See comments in `Nonterminal::to_tokenstream` for why we care about
+// *probably* equal here rather than actual equality
+//
+// This is otherwise the same as `eq_unspanned`, only recursing with a
+// different method.
+pub fn tokenstream_probably_equal_for_proc_macro(
+    first: &TokenStream,
+    other: &TokenStream,
+    sess: &ParseSess,
+) -> bool {
+
+    let mut t1 = expand_stream(first, sess); 
+    let mut t2 = expand_stream(other, sess); 
     for (t1, t2) in t1.by_ref().zip(t2.by_ref()) {
         if !tokentree_probably_equal_for_proc_macro(&t1, &t2, sess) {
             return false;
