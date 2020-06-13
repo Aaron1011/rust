@@ -2330,17 +2330,20 @@ impl<'tcx> Const<'tcx> {
         ty: Ty<'tcx>,
     ) -> Option<u128> {
         assert_eq!(self.ty, ty);
-        // Note that we erase regions *before* calling `with_reveal_all_normalized`,
-        // so that we don't try to invoke this query with
-        // any region variables.
-        let param_env_and_ty = tcx
-            .erase_regions(&param_env)
-            .with_reveal_all_normalized(tcx)
-            .and(tcx.erase_regions(&ty));
+        if let ConstKind::Value(val) = self.eval(tcx, param_env).val {
+            // Note that we erase regions *before* calling `with_reveal_all_normalized`,
+            // so that we don't try to invoke this query with
+            // any region variables.
+            let param_env_and_ty = tcx
+                .erase_regions(&param_env)
+                .with_reveal_all_normalized(tcx)
+                .and(tcx.erase_regions(&ty));
+            let size = tcx.layout_of(param_env_and_ty).ok()?.size;
 
-        let size = tcx.layout_of(param_env_and_ty).ok()?.size;
-        // if `ty` does not depend on generic parameters, use an empty param_env
-        self.eval(tcx, param_env).val.try_to_bits(size)
+            val.try_to_bits(size)
+        } else {
+            None
+        }
     }
 
     #[inline]
