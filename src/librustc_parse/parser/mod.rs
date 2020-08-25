@@ -15,7 +15,7 @@ pub use path::PathStyle;
 
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, DelimToken, Token, TokenKind};
-use rustc_ast::tokenstream::{self, DelimSpan, TokenStream, TokenTree, TreeAndJoint, PreexpTokenStream, PreexpTokenTree};
+use rustc_ast::tokenstream::{self, DelimSpan, TokenStream, TokenTree, TreeAndJoint, PreexpTokenStream, PreexpTokenTree, IsJoint};
 use rustc_ast::DUMMY_NODE_ID;
 use rustc_ast::{self as ast, AttrStyle, AttrVec, Const, CrateSugar, Extern, Unsafe};
 use rustc_ast::{Async, MacArgs, MacDelimiter, Mutability, StrLit, Visibility, VisibilityKind};
@@ -129,6 +129,7 @@ struct TokenCursorFrame {
     open_delim: bool,
     tree_cursor: tokenstream::Cursor,
     close_delim: bool,
+    modified_stream: TokenStream
 }
 
 /// Used to track additional state needed by `collect_tokens`
@@ -157,6 +158,7 @@ impl TokenCursorFrame {
             open_delim: delim == token::NoDelim,
             tree_cursor: tts.clone().into_trees(),
             close_delim: delim == token::NoDelim,
+            modified_stream: tts.clone()
         }
     }
 }
@@ -173,6 +175,19 @@ impl TokenCursor {
                 self.frame.close_delim = true;
                 TokenTree::close_tt(self.frame.span, self.frame.delim).into()
             } else if let Some(frame) = self.stack.pop() {
+                if let Some(collecting) = &mut self.collecting {
+                    if collecting.depth == self.stack.len() {
+                        debug!(
+                            "TokenCursor::next(): collected frame {:?} at depth {:?}",
+                            self.frame.modified_stream,
+                            self.stack.len()
+                        );
+                        collecting.buf.push(PreexpTokenTree::Normal(
+                            (TokenTree::Delimited(self.frame.span, self.frame.delim, self.frame.modified_stream.clone()), IsJoint::NonJoint)
+                        ));
+                    }
+                }
+
                 self.frame = frame;
                 continue;
             } else {
@@ -186,19 +201,20 @@ impl TokenCursor {
                 self.cur_token = Some(tree.clone());
             }
 
-            if let Some(collecting) = &mut self.collecting {
-                if collecting.depth == self.stack.len() {
-                    debug!(
-                        "TokenCursor::next():  collected {:?} at depth {:?}",
-                        tree,
-                        self.stack.len()
-                    );
-                    collecting.buf.push(PreexpTokenTree::Normal(tree.clone()))
+            match tree.0.clone() {
+                TokenTree::Token(token) => {
+                    if let Some(collecting) = &mut self.collecting {
+                        if collecting.depth == self.stack.len() {
+                            debug!(
+                                "TokenCursor::next():  collected {:?} at depth {:?}",
+                                tree,
+                                self.stack.len()
+                            );
+                            collecting.buf.push(PreexpTokenTree::Normal(tree.clone()))
+                        }
+                    }
+                    return token;
                 }
-            }
-
-            match tree.0 {
-                TokenTree::Token(token) => return token,
                 TokenTree::Delimited(sp, delim, tts) => {
                     let frame = TokenCursorFrame::new(sp, delim, &tts);
                     self.stack.push(mem::replace(&mut self.frame, frame));
@@ -1152,22 +1168,16 @@ impl<'a> Parser<'a> {
         &mut self,
         f: impl FnOnce(&mut Self) -> PResult<'a, R>,
     ) -> PResult<'a, (R, PreexpTokenStream)> {
-        // Record all tokens we parse when parsing this item.
-        let tokens: Vec<PreexpTokenTree> = self.token_cursor.cur_token.clone().into_iter().map(PreexpTokenTree::Normal).collect();
-        debug!("collect_tokens: starting with {:?}", tokens);
 
         // We need special handling for the case where `collect_tokens` is called
         // on an opening delimeter (e.g. '('). At this point, we have already pushed
         // a new frame - however, we want to record the original `TokenTree::Delimited`,
         // for consistency with the case where we start recording one token earlier.
         // See `TokenCursor::next` to see how `cur_token` is set up.
-        let prev_depth =
+        let (prev_depth, tokens) =
             if matches!(self.token_cursor.cur_token, Some((TokenTree::Delimited(..), _))) {
                 if self.token_cursor.stack.is_empty() {
-                    // There is nothing below us in the stack that
-                    // the function could consume, so the only thing it can legally
-                    // capture is the entire contents of the current frame.
-                    return Ok((f(self)?, PreexpTokenStream::new(tokens)));
+                    panic!("Tried to capture the entire TokenStream!");
                 }
                 // We have already recorded the full `TokenTree::Delimited` when we created
                 // our `tokens` vector at the start of this function. We are now inside
@@ -1178,10 +1188,16 @@ impl<'a> Parser<'a> {
                 // us to record a sequence like: `(foo).bar()`: the `(foo)` will be recored
                 // as our initial `cur_token`, while the `.bar()` will be recored after we
                 // pop the `(foo)` frame.
-                self.token_cursor.stack.len() - 1
+                (self.token_cursor.stack.len() - 1, Vec::new())
             } else {
-                self.token_cursor.stack.len()
+                let tokens = self.token_cursor.cur_token.clone().into_iter().map(PreexpTokenTree::Normal).collect();
+                (self.token_cursor.stack.len(), tokens)
             };
+
+        // Record all tokens we parse when parsing this item.
+        debug!("collect_tokens: starting with {:?}", tokens);
+
+
         let prev_collecting =
             self.token_cursor.collecting.replace(Collecting { buf: tokens, depth: prev_depth });
 
