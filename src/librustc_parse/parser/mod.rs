@@ -129,7 +129,7 @@ struct TokenCursorFrame {
     open_delim: bool,
     tree_cursor: tokenstream::Cursor,
     close_delim: bool,
-    modified_stream: TokenStream
+    modified_stream: Vec<(PreexpTokenTree, IsJoint)>
 }
 
 /// Used to track additional state needed by `collect_tokens`
@@ -158,7 +158,7 @@ impl TokenCursorFrame {
             open_delim: delim == token::NoDelim,
             tree_cursor: tts.clone().into_trees(),
             close_delim: delim == token::NoDelim,
-            modified_stream: tts.clone()
+            modified_stream: vec![]
         }
     }
 }
@@ -170,6 +170,11 @@ impl TokenCursor {
                 self.frame.open_delim = true;
                 TokenTree::open_tt(self.frame.span, self.frame.delim).into()
             } else if let Some(tree) = self.frame.tree_cursor.next_with_joint() {
+                let new_tree = match tree.0.clone() {
+                    TokenTree::Token(token) => PreexpTokenTree::Token(token),
+                    TokenTree::Delimited(sp, delim, stream) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(stream))
+                };
+                self.frame.modified_stream.push((new_tree, tree.1));
                 tree
             } else if !self.frame.close_delim {
                 self.frame.close_delim = true;
@@ -188,7 +193,7 @@ impl TokenCursor {
                             (PreexpTokenTree::Delimited(
                                     self.frame.span,
                                     self.frame.delim,
-                                    PreexpTokenStream::from_tokenstream(self.frame.modified_stream.clone()),
+                                    PreexpTokenStream::new(self.frame.modified_stream.clone()),
                              ), IsJoint::NonJoint)
                         );
                     }
@@ -1000,7 +1005,7 @@ impl<'a> Parser<'a> {
                 );
                 self.token = Token::new(TokenKind::CloseDelim(frame.delim), frame.span.close);
                 self.bump()*/;
-                TokenTree::Delimited(span, delim, stream)
+                TokenTree::Delimited(span, delim, PreexpTokenStream::new(stream).to_tokenstream())
             }
             token::CloseDelim(_) | token::Eof => unreachable!(),
             _ => {
