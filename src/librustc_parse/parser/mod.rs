@@ -137,7 +137,7 @@ struct TokenCursorFrame {
 struct Collecting {
     /// Holds the current tokens captured during the most
     /// recent call to `collect_tokens`
-    buf: Vec<PreexpTokenTree>,
+    buf: Vec<(PreexpTokenTree, IsJoint)>,
     /// The depth of the `TokenCursor` stack at the time
     /// collection was started. When we encounter a `TokenTree::Delimited`,
     /// we want to record the `TokenTree::Delimited` itself,
@@ -184,9 +184,13 @@ impl TokenCursor {
                             self.frame.modified_stream,
                             self.stack.len()
                         );
-                        collecting.buf.push(PreexpTokenTree::Normal(
-                            (TokenTree::Delimited(self.frame.span, self.frame.delim, self.frame.modified_stream.clone()), IsJoint::NonJoint)
-                        ));
+                        collecting.buf.push(
+                            (PreexpTokenTree::Delimited(
+                                    self.frame.span,
+                                    self.frame.delim,
+                                    PreexpTokenStream::from_tokenstream(self.frame.modified_stream.clone()),
+                             ), IsJoint::NonJoint)
+                        );
                     }
                 }
 
@@ -212,7 +216,7 @@ impl TokenCursor {
                                 tree,
                                 self.stack.len()
                             );
-                            collecting.buf.push(PreexpTokenTree::Normal(tree.clone()))
+                            collecting.buf.push((PreexpTokenTree::Token(token.clone()), tree.1))
                         }
                     }
                     return token;
@@ -1206,7 +1210,13 @@ impl<'a> Parser<'a> {
                 // pop the `(foo)` frame.
                 (self.token_cursor.stack.len() - 1, Vec::new())
             } else {
-                let tokens = self.token_cursor.cur_token.clone().into_iter().map(PreexpTokenTree::Normal).collect();
+                let tokens = self.token_cursor.cur_token.clone().map(|tree| {
+                    let new_tree = match tree.0 {
+                        TokenTree::Token(token) => PreexpTokenTree::Token(token),
+                        TokenTree::Delimited(sp, delim, stream) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(stream))
+                    };
+                    (new_tree, tree.1)
+                }).into_iter().collect();
                 (self.token_cursor.stack.len(), tokens)
             };
 
@@ -1237,7 +1247,7 @@ impl<'a> Parser<'a> {
         // `f`, but it'll still be in our list that we pulled out. In that case
         // put it back.
         let extra_token = if self.token != token::Eof {
-            if let Some(PreexpTokenTree::Normal((TokenTree::Delimited(..), _))) = collected_tokens.last() {
+            if let Some((PreexpTokenTree::Delimited(..), _)) = collected_tokens.last() {
                 None
             } else {
                 collected_tokens.pop()

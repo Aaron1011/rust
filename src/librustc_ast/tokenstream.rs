@@ -433,22 +433,26 @@ impl DelimSpan {
 }
 
 #[derive(Clone, Debug, Default, Encodable, Decodable)]
-pub struct PreexpTokenStream(Lrc<Vec<PreexpTokenTree>>);
+pub struct PreexpTokenStream(Lrc<Vec<(PreexpTokenTree, IsJoint)>>);
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub enum PreexpTokenTree {
-    Normal(TreeAndJoint),
+    Token(Token),
+    Delimited(DelimSpan, DelimToken, PreexpTokenStream),
     OuterAttributes(AttributesData)
 }
 
 impl PreexpTokenStream {
-    pub fn new(tokens: Vec<PreexpTokenTree>) -> PreexpTokenStream {
+    pub fn new(tokens: Vec<(PreexpTokenTree, IsJoint)>) -> PreexpTokenStream {
         PreexpTokenStream(Lrc::new(tokens))
     }
 
     pub fn to_tokenstream(self) -> TokenStream {
-        let trees: Vec<_> = self.0.iter().flat_map(|tree| match tree {
-            PreexpTokenTree::Normal(inner) => vec![inner.clone()].into_iter(),
+        let trees: Vec<_> = self.0.iter().flat_map(|tree| match &tree.0 {
+            PreexpTokenTree::Token(inner) => vec![(TokenTree::Token(inner.clone()), tree.1)].into_iter(),
+            PreexpTokenTree::Delimited(span, delim, stream) => {
+                vec![(TokenTree::Delimited(*span, *delim, stream.clone().to_tokenstream()), tree.1)].into_iter()
+            }
             PreexpTokenTree::OuterAttributes(data) => {
                 /*let mut builder = TokenStreamBuilder::new();
                 for (_attr, tokens) in &data.attrs {
@@ -462,6 +466,17 @@ impl PreexpTokenStream {
             }
         }).collect();
         TokenStream::new(trees)
+    }
+
+    pub fn from_tokenstream(stream: TokenStream) -> PreexpTokenStream {
+        let trees: Vec<_> = stream.0.iter().cloned().map(|tree| {
+            let new_tree = match tree.0 {
+                TokenTree::Token(token) => PreexpTokenTree::Token(token),
+                TokenTree::Delimited(sp, delim, inner) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(inner))
+            };
+            (new_tree, tree.1)
+        }).collect();
+        PreexpTokenStream::new(trees)
     }
 }
 

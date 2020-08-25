@@ -2,7 +2,7 @@ use super::{Parser, PathStyle};
 use rustc_ast as ast;
 use rustc_ast::attr;
 use rustc_ast::token::{self, Nonterminal};
-use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree};
+use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{error_code, PResult};
 use rustc_span::Span;
@@ -98,7 +98,7 @@ impl<'a> Parser<'a> {
                 target: PreexpTokenStream::new(target_tokens)
             };
             debug!("target_start={:?} collecting={:?} attr data: {:?}", target_start, collecting, data);
-            collecting.buf.push(PreexpTokenTree::OuterAttributes(data));
+            collecting.buf.push((PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
         }
 
         res
