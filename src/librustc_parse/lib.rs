@@ -310,6 +310,8 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
     // tokens such as extra braces and commas, don't happen.
     if let Some(tokens) = tokens {
         if tokenstream_probably_equal_for_proc_macro(&tokens, &tokens_for_real, sess) {
+            debug!("matching tokens: {:?}", tokens);
+            debug!("reparsed tokens: {:?}", tokens_for_real);
             return tokens;
         }
         info!(
@@ -443,12 +445,17 @@ pub fn tokenstream_probably_equal_for_proc_macro(
     // that are produced as a result of nonterminal expansion.
     let mut t1 = first.trees().filter(semantic_tree).flat_map(expand_nt).flat_map(break_tokens);
     let mut t2 = other.trees().filter(semantic_tree).flat_map(expand_nt).flat_map(break_tokens);
-    for (t1, t2) in t1.by_ref().zip(t2.by_ref()) {
-        if !tokentree_probably_equal_for_proc_macro(&t1, &t2, sess) {
-            return false;
+    loop {
+        match (t1.next(), t2.next()) {
+            (Some(tree1), Some(tree2)) => {
+                if !tokentree_probably_equal_for_proc_macro(&tree1, &tree2, sess) {
+                    return false;
+                }
+            }
+            (None, None) => return true,
+            _ => return false
         }
     }
-    t1.next().is_none() && t2.next().is_none()
 }
 
 // See comments in `Nonterminal::to_tokenstream` for why we care about
