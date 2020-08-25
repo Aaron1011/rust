@@ -2,6 +2,7 @@ use super::{Parser, PathStyle};
 use rustc_ast as ast;
 use rustc_ast::attr;
 use rustc_ast::token::{self, Nonterminal};
+use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{error_code, PResult};
 use rustc_span::Span;
@@ -25,12 +26,18 @@ pub(super) const DEFAULT_INNER_ATTR_FORBIDDEN: InnerAttrPolicy<'_> = InnerAttrPo
 
 impl<'a> Parser<'a> {
     /// Parses attributes that appear before an item.
-    pub(super) fn parse_outer_attributes(&mut self) -> PResult<'a, Vec<ast::Attribute>> {
+    pub(super) fn parse_outer_attributes<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
+    ) -> PResult<'a, R> {
         let mut attrs: Vec<ast::Attribute> = Vec::new();
+        let mut attr_tokens = Vec::new();
         let mut just_parsed_doc_comment = false;
         loop {
+            let start_pos = self.token_cursor.collecting.as_ref().map(|collecting| collecting.buf.len());
+
             debug!("parse_outer_attributes: self.token={:?}", self.token);
-            if self.check(&token::Pound) {
+            let parsed_attr = if self.check(&token::Pound) {
                 let inner_error_reason = if just_parsed_doc_comment {
                     "an inner attribute is not permitted following an outer doc comment"
                 } else if !attrs.is_empty() {
@@ -46,6 +53,7 @@ impl<'a> Parser<'a> {
                 let attr = self.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
                 attrs.push(attr);
                 just_parsed_doc_comment = false;
+                true
             } else if let token::DocComment(comment_kind, attr_style, data) = self.token.kind {
                 let attr = attr::mk_doc_comment(comment_kind, attr_style, data, self.token.span);
                 if attr.style != ast::AttrStyle::Outer {
@@ -65,11 +73,35 @@ impl<'a> Parser<'a> {
                 attrs.push(attr);
                 self.bump();
                 just_parsed_doc_comment = true;
+                true
             } else {
+                false
+            };
+
+            if !parsed_attr {
                 break;
             }
+            if let Some(collecting) = self.token_cursor.collecting.as_mut() {
+                let tokens: Vec<_> = collecting.buf.drain(start_pos.unwrap()..).collect();
+                attr_tokens.push(tokens);
+            }
         }
-        Ok(attrs)
+        let target_start = self.token_cursor.collecting.as_ref().map(|collecting| collecting.buf.len());
+        let res = f(self, attrs.clone());
+        if let Some(collecting) = self.token_cursor.collecting.as_mut() {
+            let target_tokens: Vec<_> = collecting.buf.drain(target_start.unwrap()..).collect();
+            let attr_tokens = attr_tokens.into_iter().map(|tokens| {
+                PreexpTokenStream::new(tokens).to_tokenstream()
+            });
+            let data = AttributesData {
+                attrs: attrs.into_iter().zip(attr_tokens).collect(),
+                target: PreexpTokenStream::new(target_tokens)
+            };
+            debug!("attr data: {:?}", data);
+            collecting.buf.push(PreexpTokenTree::OuterAttributes(data));
+        }
+
+        res
     }
 
     /// Matches `attribute = # ! [ meta_item ]`.

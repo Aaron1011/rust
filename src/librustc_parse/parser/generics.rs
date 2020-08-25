@@ -73,67 +73,72 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_generic_params(&mut self) -> PResult<'a, Vec<ast::GenericParam>> {
         let mut params = Vec::new();
         loop {
-            let attrs = self.parse_outer_attributes()?;
-            if self.check_lifetime() {
-                let lifetime = self.expect_lifetime();
-                // Parse lifetime parameter.
-                let bounds =
-                    if self.eat(&token::Colon) { self.parse_lt_param_bounds() } else { Vec::new() };
-                params.push(ast::GenericParam {
-                    ident: lifetime.ident,
-                    id: lifetime.id,
-                    attrs: attrs.into(),
-                    bounds,
-                    kind: ast::GenericParamKind::Lifetime,
-                    is_placeholder: false,
-                });
-            } else if self.check_keyword(kw::Const) {
-                // Parse const parameter.
-                params.push(self.parse_const_param(attrs)?);
-            } else if self.check_ident() {
-                // Parse type parameter.
-                params.push(self.parse_ty_param(attrs)?);
-            } else if self.token.can_begin_type() {
-                // Trying to write an associated type bound? (#26271)
-                let snapshot = self.clone();
-                match self.parse_ty_where_predicate() {
-                    Ok(where_predicate) => {
-                        self.struct_span_err(
-                            where_predicate.span(),
-                            "bounds on associated types do not belong here",
-                        )
-                        .span_label(where_predicate.span(), "belongs in `where` clause")
-                        .emit();
-                    }
-                    Err(mut err) => {
-                        err.cancel();
-                        *self = snapshot;
-                        break;
-                    }
-                }
-            } else {
-                // Check for trailing attributes and stop parsing.
-                if !attrs.is_empty() {
-                    if !params.is_empty() {
-                        self.struct_span_err(
-                            attrs[0].span,
-                            "trailing attribute after generic parameter",
-                        )
-                        .span_label(attrs[0].span, "attributes must go before parameters")
-                        .emit();
-                    } else {
-                        self.struct_span_err(attrs[0].span, "attribute without generic parameters")
-                            .span_label(
-                                attrs[0].span,
-                                "attributes are only permitted when preceding parameters",
+            let should_break = self.parse_outer_attributes(|this, attrs| {
+                if this.check_lifetime() {
+                    let lifetime = this.expect_lifetime();
+                    // Parse lifetime parameter.
+                    let bounds =
+                        if this.eat(&token::Colon) { this.parse_lt_param_bounds() } else { Vec::new() };
+                    params.push(ast::GenericParam {
+                        ident: lifetime.ident,
+                        id: lifetime.id,
+                        attrs: attrs.into(),
+                        bounds,
+                        kind: ast::GenericParamKind::Lifetime,
+                        is_placeholder: false,
+                    });
+                } else if this.check_keyword(kw::Const) {
+                    // Parse const parameter.
+                    params.push(this.parse_const_param(attrs)?);
+                } else if this.check_ident() {
+                    // Parse type parameter.
+                    params.push(this.parse_ty_param(attrs)?);
+                } else if this.token.can_begin_type() {
+                    // Trying to write an associated type bound? (#26271)
+                    let snapshot = this.clone();
+                    match this.parse_ty_where_predicate() {
+                        Ok(where_predicate) => {
+                            this.struct_span_err(
+                                where_predicate.span(),
+                                "bounds on associated types do not belong here",
                             )
+                            .span_label(where_predicate.span(), "belongs in `where` clause")
                             .emit();
+                        }
+                        Err(mut err) => {
+                            err.cancel();
+                            *this = snapshot;
+                            return Ok(true);
+                        }
                     }
+                } else {
+                    // Check for trailing attributes and stop parsing.
+                    if !attrs.is_empty() {
+                        if !params.is_empty() {
+                            this.struct_span_err(
+                                attrs[0].span,
+                                "trailing attribute after generic parameter",
+                            )
+                            .span_label(attrs[0].span, "attributes must go before parameters")
+                            .emit();
+                        } else {
+                            this.struct_span_err(attrs[0].span, "attribute without generic parameters")
+                                .span_label(
+                                    attrs[0].span,
+                                    "attributes are only permitted when preceding parameters",
+                                )
+                                .emit();
+                        }
+                    }
+                    return Ok(true);
                 }
-                break;
-            }
 
-            if !self.eat(&token::Comma) {
+                if !this.eat(&token::Comma) {
+                    return Ok(true);
+                }
+                Ok(false)
+            })?;
+            if should_break {
                 break;
             }
         }

@@ -950,7 +950,7 @@ impl<'a> Parser<'a> {
         if let Some(attrs) = already_parsed_attrs {
             Ok(attrs)
         } else {
-            self.parse_outer_attributes().map(|a| a.into())
+            self.parse_outer_attributes(|_this, attrs| Ok(attrs)).map(|a| a.into())
         }
     }
 
