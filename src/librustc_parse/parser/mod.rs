@@ -175,7 +175,9 @@ impl TokenCursor {
                 self.frame.close_delim = true;
                 TokenTree::close_tt(self.frame.span, self.frame.delim).into()
             } else if let Some(frame) = self.stack.pop() {
+                debug!("popped frame {:?} with collecting {:?}", frame.modified_stream, self.collecting);
                 if let Some(collecting) = &mut self.collecting {
+                    debug!("stack depth: {:?} frame: {:?}", self.stack.len(), self.frame.modified_stream);
                     if collecting.depth == self.stack.len() {
                         debug!(
                             "TokenCursor::next(): collected frame {:?} at depth {:?}",
@@ -974,13 +976,27 @@ impl<'a> Parser<'a> {
     pub(crate) fn parse_token_tree(&mut self) -> TokenTree {
         match self.token.kind {
             token::OpenDelim(..) => {
-                let frame = mem::replace(
+                let depth = self.token_cursor.stack.len();
+                while !(
+                    depth == self.token_cursor.stack.len()
+                    && matches!(self.token.kind, token::CloseDelim(_))
+                ) {
+                    self.bump();
+                }
+                let frame = &self.token_cursor.frame;
+                let stream = frame.modified_stream.clone();
+                let span = frame.span;
+                let delim = frame.delim;
+                // Consume close delimiter
+                self.bump();
+
+                /*let frame = mem::replace(
                     &mut self.token_cursor.frame,
                     self.token_cursor.stack.pop().unwrap(),
                 );
                 self.token = Token::new(TokenKind::CloseDelim(frame.delim), frame.span.close);
-                self.bump();
-                TokenTree::Delimited(frame.span, frame.delim, frame.tree_cursor.stream)
+                self.bump()*/;
+                TokenTree::Delimited(span, delim, stream)
             }
             token::CloseDelim(_) | token::Eof => unreachable!(),
             _ => {
@@ -1220,7 +1236,15 @@ impl<'a> Parser<'a> {
         // If we're not at EOF our current token wasn't actually consumed by
         // `f`, but it'll still be in our list that we pulled out. In that case
         // put it back.
-        let extra_token = if self.token != token::Eof { collected_tokens.pop() } else { None };
+        let extra_token = if self.token != token::Eof {
+            if let Some(PreexpTokenTree::Normal((TokenTree::Delimited(..), _))) = collected_tokens.last() {
+                None
+            } else {
+                collected_tokens.pop()
+            }
+        } else {
+            None
+        };
 
         if let Some(mut collecting) = prev_collecting {
             // If we were previously collecting at the same depth,
