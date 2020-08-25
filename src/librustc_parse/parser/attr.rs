@@ -97,7 +97,7 @@ impl<'a> Parser<'a> {
                 attrs: attrs.into_iter().zip(attr_tokens).collect(),
                 target: PreexpTokenStream::new(target_tokens)
             };
-            debug!("attr data: {:?}", data);
+            debug!("target_start={:?} collecting={:?} attr data: {:?}", target_start, collecting, data);
             collecting.buf.push(PreexpTokenTree::OuterAttributes(data));
         }
 
