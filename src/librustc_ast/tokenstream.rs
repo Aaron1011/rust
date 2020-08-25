@@ -431,3 +431,42 @@ impl DelimSpan {
         self.open.with_hi(self.close.hi())
     }
 }
+
+#[derive(Clone, Debug, Default, Encodable, Decodable)]
+pub struct PreexpTokenStream(Lrc<Vec<PreexpTokenTree>>);
+
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub enum PreexpTokenTree {
+    Normal(TreeAndJoint),
+    OuterAttributes(AttributesData)
+}
+
+impl PreexpTokenStream {
+    pub fn new(tokens: Vec<PreexpTokenTree>) -> PreexpTokenStream {
+        PreexpTokenStream(Lrc::new(tokens))
+    }
+
+    pub fn to_tokenstream(self) -> TokenStream {
+        let trees: Vec<_> = self.0.iter().flat_map(|tree| match tree {
+            PreexpTokenTree::Normal(inner) => vec![inner.clone()].into_iter(),
+            PreexpTokenTree::OuterAttributes(data) => {
+                /*let mut builder = TokenStreamBuilder::new();
+                for (_attr, tokens) in &data.attrs {
+                    builder.push(tokens.clone());
+                }
+                builder.push(data.target.clone().to_tokenstream());*/
+                let flat: Vec<_> = data.attrs.iter().flat_map(|(_attr, tokens)| tokens.0.iter().cloned())
+                    .chain(data.target.clone().to_tokenstream().0.iter().cloned())
+                    .collect();
+                flat.into_iter()
+            }
+        }).collect();
+        TokenStream::new(trees)
+    }
+}
+
+#[derive(Clone, Debug, Encodable, Decodable)]
+pub struct AttributesData {
+    pub attrs: Vec<(crate::Attribute, TokenStream)>,
+    pub target: PreexpTokenStream
+}

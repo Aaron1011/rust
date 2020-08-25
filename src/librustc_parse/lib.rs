@@ -261,7 +261,7 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
     // before we fall back to the stringification.
     let tokens = match *nt {
         Nonterminal::NtItem(ref item) => {
-            prepend_attrs(sess, &item.attrs, item.tokens.as_ref(), span)
+            prepend_attrs(sess, &item.attrs, item.tokens.as_ref().map(|stream| stream.clone().to_tokenstream()).as_ref(), span)
         }
         Nonterminal::NtPat(ref pat) => pat.tokens.clone(),
         Nonterminal::NtIdent(ident, is_raw) => {

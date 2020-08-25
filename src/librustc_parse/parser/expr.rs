@@ -1087,7 +1087,7 @@ impl<'a> Parser<'a> {
         if has_outer_attrs {
             let (mut expr, tokens) = self.collect_tokens(f)?;
             debug!("maybe_collect_tokens: Collected tokens for {:?} (tokens {:?}", expr, tokens);
-            expr.tokens = Some(tokens);
+            expr.tokens = Some(tokens.to_tokenstream());
             Ok(expr)
         } else {
             f(self)

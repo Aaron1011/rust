@@ -120,7 +120,7 @@ impl<'a> Parser<'a> {
                 let (mut pat, tokens) = self.collect_tokens(|this| this.parse_pat(None))?;
                 // We have have eaten an NtPat, which could already have tokens
                 if pat.tokens.is_none() {
-                    pat.tokens = Some(tokens);
+                    pat.tokens = Some(tokens.to_tokenstream());
                 }
                 token::NtPat(pat)
             }
@@ -129,7 +129,7 @@ impl<'a> Parser<'a> {
                 // If we captured tokens during parsing (due to outer attributes),
                 // use those.
                 if expr.tokens.is_none() {
-                    expr.tokens = Some(tokens);
+                    expr.tokens = Some(tokens.to_tokenstream());
                 }
                 token::NtExpr(expr)
             }

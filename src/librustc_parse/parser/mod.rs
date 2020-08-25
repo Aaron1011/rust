@@ -15,7 +15,7 @@ pub use path::PathStyle;
 
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, DelimToken, Token, TokenKind};
-use rustc_ast::tokenstream::{self, DelimSpan, TokenStream, TokenTree, TreeAndJoint};
+use rustc_ast::tokenstream::{self, DelimSpan, TokenStream, TokenTree, TreeAndJoint, PreexpTokenStream, PreexpTokenTree};
 use rustc_ast::DUMMY_NODE_ID;
 use rustc_ast::{self as ast, AttrStyle, AttrVec, Const, CrateSugar, Extern, Unsafe};
 use rustc_ast::{Async, MacArgs, MacDelimiter, Mutability, StrLit, Visibility, VisibilityKind};
@@ -136,7 +136,7 @@ struct TokenCursorFrame {
 struct Collecting {
     /// Holds the current tokens captured during the most
     /// recent call to `collect_tokens`
-    buf: Vec<TreeAndJoint>,
+    buf: Vec<PreexpTokenTree>,
     /// The depth of the `TokenCursor` stack at the time
     /// collection was started. When we encounter a `TokenTree::Delimited`,
     /// we want to record the `TokenTree::Delimited` itself,
@@ -193,7 +193,7 @@ impl TokenCursor {
                         tree,
                         self.stack.len()
                     );
-                    collecting.buf.push(tree.clone())
+                    collecting.buf.push(PreexpTokenTree::Normal(tree.clone()))
                 }
             }
 
@@ -1151,9 +1151,9 @@ impl<'a> Parser<'a> {
     pub fn collect_tokens<R>(
         &mut self,
         f: impl FnOnce(&mut Self) -> PResult<'a, R>,
-    ) -> PResult<'a, (R, TokenStream)> {
+    ) -> PResult<'a, (R, PreexpTokenStream)> {
         // Record all tokens we parse when parsing this item.
-        let tokens: Vec<TreeAndJoint> = self.token_cursor.cur_token.clone().into_iter().collect();
+        let tokens: Vec<PreexpTokenTree> = self.token_cursor.cur_token.clone().into_iter().map(PreexpTokenTree::Normal).collect();
         debug!("collect_tokens: starting with {:?}", tokens);
 
         // We need special handling for the case where `collect_tokens` is called
@@ -1167,7 +1167,7 @@ impl<'a> Parser<'a> {
                     // There is nothing below us in the stack that
                     // the function could consume, so the only thing it can legally
                     // capture is the entire contents of the current frame.
-                    return Ok((f(self)?, TokenStream::new(tokens)));
+                    return Ok((f(self)?, PreexpTokenStream::new(tokens)));
                 }
                 // We have already recorded the full `TokenTree::Delimited` when we created
                 // our `tokens` vector at the start of this function. We are now inside
@@ -1187,7 +1187,7 @@ impl<'a> Parser<'a> {
 
         let ret = f(self);
 
-        let mut collected_tokens = if let Some(collecting) = self.token_cursor.collecting.take() {
+        let mut collected_tokens: Vec<_> = if let Some(collecting) = self.token_cursor.collecting.take() {
             collecting.buf
         } else {
             let msg = "our vector went away?";
@@ -1196,7 +1196,7 @@ impl<'a> Parser<'a> {
             // This can happen due to a bad interaction of two unrelated recovery mechanisms
             // with mismatched delimiters *and* recovery lookahead on the likely typo
             // `pub ident(` (#62895, different but similar to the case above).
-            return Ok((ret?, TokenStream::default()));
+            return Ok((ret?, PreexpTokenStream::default()));
         };
 
         debug!("collect_tokens: got raw tokens {:?}", collected_tokens);
@@ -1223,7 +1223,7 @@ impl<'a> Parser<'a> {
             self.token_cursor.collecting = Some(collecting)
         }
 
-        Ok((ret?, TokenStream::new(collected_tokens)))
+        Ok((ret?, PreexpTokenStream::new(collected_tokens)))
     }
 
     /// `::{` or `::*`
