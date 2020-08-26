@@ -38,50 +38,42 @@ impl<'a> Parser<'a> {
 
         loop {
             debug!("parse_outer_attributes: self.token={:?}", self.token);
-            let (parsed_attr, tokens) = self.collect_tokens(|this| {
-                if this.check(&token::Pound) {
-                    let inner_error_reason = if just_parsed_doc_comment {
-                        "an inner attribute is not permitted following an outer doc comment"
-                    } else if !attrs.is_empty() {
-                        "an inner attribute is not permitted following an outer attribute"
-                    } else {
-                        DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
-                    };
-                    let inner_parse_policy = InnerAttrPolicy::Forbidden {
-                        reason: inner_error_reason,
-                        saw_doc_comment: just_parsed_doc_comment,
-                        prev_attr_sp: attrs.last().map(|a| a.span),
-                    };
-                    let attr = this.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
-                    attrs.push(attr);
-                    just_parsed_doc_comment = false;
-                    Ok(true)
-                } else if let token::DocComment(comment_kind, attr_style, data) = this.token.kind {
-                    let attr = attr::mk_doc_comment(comment_kind, attr_style, data, this.token.span);
-                    if attr.style != ast::AttrStyle::Outer {
-                        this.sess
-                            .span_diagnostic
-                            .struct_span_err_with_code(
-                                this.token.span,
-                                "expected outer doc comment",
-                                error_code!(E0753),
-                            )
-                            .note(
-                                "inner doc comments like this (starting with \
-                                 `//!` or `/*!`) can only appear before items",
-                            )
-                            .emit();
-                    }
-                    attrs.push(attr);
-                    this.bump();
-                    just_parsed_doc_comment = true;
-                    Ok(true)
+            if self.check(&token::Pound) {
+                let inner_error_reason = if just_parsed_doc_comment {
+                    "an inner attribute is not permitted following an outer doc comment"
+                } else if !attrs.is_empty() {
+                    "an inner attribute is not permitted following an outer attribute"
                 } else {
-                    Ok(false)
+                    DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
+                };
+                let inner_parse_policy = InnerAttrPolicy::Forbidden {
+                    reason: inner_error_reason,
+                    saw_doc_comment: just_parsed_doc_comment,
+                    prev_attr_sp: attrs.last().map(|a| a.span),
+                };
+                let attr = self.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
+                attrs.push(attr);
+                just_parsed_doc_comment = false;
+            } else if let token::DocComment(comment_kind, attr_style, data) = self.token.kind {
+                let attr = attr::mk_doc_comment(comment_kind, attr_style, data, self.token.span);
+                if attr.style != ast::AttrStyle::Outer {
+                    self.sess
+                        .span_diagnostic
+                        .struct_span_err_with_code(
+                            self.token.span,
+                            "expected outer doc comment",
+                            error_code!(E0753),
+                        )
+                        .note(
+                            "inner doc comments like this (starting with \
+                             `//!` or `/*!`) can only appear before items",
+                        )
+                        .emit();
                 }
-            })?;
-
-            if !parsed_attr {
+                attrs.push(attr);
+                self.bump();
+                just_parsed_doc_comment = true;
+            } else {
                 break;
             }
         }

@@ -1835,7 +1835,7 @@ impl<'a> Parser<'a> {
     }
 
     fn recover_first_param(&mut self) -> &'static str {
-        let res = self.parse_outer_attributes(|this, attrs| {
+        let res = self.parse_outer_attributes(|this, _attrs| {
             this.parse_self_param()
         }).map_err(|mut err| err.cancel());
         match res {
