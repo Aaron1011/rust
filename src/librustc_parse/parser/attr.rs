@@ -100,13 +100,18 @@ impl<'a> Parser<'a> {
             self.struct_span_err(self.token.span, "Weird depth").emit();
             panic!();
         };
-        let end = frame.modified_stream.len() - 1;
+        let end = if frame.close_delim {
+            frame.modified_stream.len()
+        } else {
+            frame.modified_stream.len() - 1
+        };
 
         let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
         let data = AttributesData {
             attrs,
             tokens: PreexpTokenStream::new(all_tokens)
         };
+        debug!("got AttributesData: {:?}", data);
         frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
         res
        
