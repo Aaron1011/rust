@@ -31,11 +31,11 @@ impl<'a> Parser<'a> {
         f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
     ) -> PResult<'a, R> {
         let mut attrs: Vec<ast::Attribute> = Vec::new();
-        let mut attr_tokens: Vec<TokenStream> = Vec::new();
         let mut just_parsed_doc_comment = false;
 
         let start_depth = self.token_cursor.stack.len();
         let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
+
         loop {
             debug!("parse_outer_attributes: self.token={:?}", self.token);
             let (parsed_attr, tokens) = self.collect_tokens(|this| {
@@ -84,16 +84,12 @@ impl<'a> Parser<'a> {
             if !parsed_attr {
                 break;
             }
-            attr_tokens.push(tokens.to_tokenstream());
         }
 
+        let res = f(self, attrs.clone());
         if attrs.is_empty() {
-            return f(self, attrs);
+            return res;
         }
-
-        let (res, target_tokens) = self.collect_tokens(|this| {
-            f(this, attrs.clone())
-        })?;
 
         let new_depth = self.token_cursor.stack.len();
         let frame = if new_depth == start_depth + 1 {
@@ -104,14 +100,15 @@ impl<'a> Parser<'a> {
             self.struct_span_err(self.token.span, "Weird depth").emit();
             panic!();
         };
-
         let end = frame.modified_stream.len() - 1;
-        let data = AttributesData {
-            attrs: attrs.into_iter().zip(attr_tokens).collect(),
-            target: target_tokens
-        };
+
         let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
+        let data = AttributesData {
+            attrs,
+            tokens: PreexpTokenStream::new(all_tokens)
+        };
         frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
+        res
        
         /*if !attrs.is_empty() {
             let target_start = if depth > self.token_cursor.stack.len() {
@@ -139,7 +136,6 @@ impl<'a> Parser<'a> {
             debug!("target_start={:?} attr data: {:?}", target_start, data);
                 self.token_cursor.frame.modified_stream.push((PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
         }*/
-        Ok(res)
     }
 
     /// Matches `attribute = # ! [ meta_item ]`.

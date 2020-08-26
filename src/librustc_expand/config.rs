@@ -4,6 +4,7 @@ use rustc_ast::attr::HasAttrs;
 use rustc_ast::mut_visit::*;
 use rustc_ast::ptr::P;
 use rustc_ast::{self as ast, AttrItem, Attribute, MetaItem};
+use rustc_ast::tokenstream::{PreexpTokenStream, PreexpTokenTree};
 use rustc_attr as attr;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::map_in_place::MapInPlace;
@@ -253,6 +254,25 @@ impl<'a> StripUnconfigured<'a> {
             attrs.flat_map_in_place(|attr| self.process_cfg_attr(attr));
         });
     }
+    
+    fn configure_tokens(&mut self, stream: PreexpTokenStream) -> PreexpTokenStream {
+        tracing::debug!("configuring tokens: {:?}", stream);
+        let trees: Vec<_> = stream.0.iter().flat_map(|tree| {
+            match tree.0.clone() {
+                PreexpTokenTree::OuterAttributes(mut data) => {
+                    self.process_cfg_attrs(&mut data.attrs);
+                    let processed: Vec<_> = self.in_cfg(&data.attrs).then_some(data.tokens)
+                        .iter().flat_map(|stream| stream.0.iter().cloned()).collect();
+                    processed.into_iter()
+                }
+                PreexpTokenTree::Delimited(sp, delim, inner) => {
+                    vec![(PreexpTokenTree::Delimited(sp, delim, self.configure_tokens(inner)), tree.1)].into_iter()
+                }
+                PreexpTokenTree::Token(_) => vec![tree.clone()].into_iter(),
+            }
+        }).collect();
+        PreexpTokenStream::new(trees)
+    }
 
     /// Parse and expand a single `cfg_attr` attribute into a list of attributes
     /// when the configuration predicate is true, or otherwise expand into an
@@ -500,7 +520,8 @@ impl<'a> MutVisitor for StripUnconfigured<'a> {
         noop_flat_map_stmt(configure!(self, stmt), self)
     }
 
-    fn flat_map_item(&mut self, item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
+    fn flat_map_item(&mut self, mut item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
+        item.tokens = item.tokens.clone().map(|tokens| self.configure_tokens(tokens));
         noop_flat_map_item(configure!(self, item), self)
     }
 

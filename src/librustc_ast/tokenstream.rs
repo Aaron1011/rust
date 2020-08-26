@@ -437,7 +437,7 @@ impl DelimSpan {
 }
 
 #[derive(Clone, Debug, Default, Encodable, Decodable)]
-pub struct PreexpTokenStream(Lrc<Vec<(PreexpTokenTree, IsJoint)>>);
+pub struct PreexpTokenStream(pub Lrc<Vec<(PreexpTokenTree, IsJoint)>>);
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub enum PreexpTokenTree {
@@ -463,10 +463,12 @@ impl PreexpTokenStream {
                     builder.push(tokens.clone());
                 }
                 builder.push(data.target.clone().to_tokenstream());*/
-                let flat: Vec<_> = data.attrs.iter().flat_map(|(_attr, tokens)| tokens.0.iter().cloned())
+                /*let flat: Vec<_> = data.attrs.iter().flat_map(|(_attr, tokens)| tokens.0.iter().cloned())
                     .chain(data.target.clone().to_tokenstream().0.iter().cloned())
                     .collect();
-                flat.into_iter()
+                flat.into_iter()*/
+                let tokens: Vec<_> = data.tokens.clone().to_tokenstream().0.iter().cloned().collect();
+                tokens.into_iter()
             }
         }).collect();
         TokenStream::new(trees)
@@ -486,6 +488,6 @@ impl PreexpTokenStream {
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct AttributesData {
-    pub attrs: Vec<(crate::Attribute, TokenStream)>,
-    pub target: PreexpTokenStream
+    pub attrs: Vec<crate::Attribute>,
+    pub tokens: PreexpTokenStream
 }
