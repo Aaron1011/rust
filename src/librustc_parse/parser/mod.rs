@@ -181,15 +181,8 @@ impl TokenCursor {
                 self.frame.close_delim = true;
                 TokenTree::close_tt(self.frame.span, self.frame.delim).into()
             } else if let Some(frame) = self.stack.pop() {
-                debug!("popped frame {:?} with collecting {:?}", frame.modified_stream, self.collecting);
                 if let Some(collecting) = &mut self.collecting {
-                    debug!("stack depth: {:?} frame: {:?}", self.stack.len(), self.frame.modified_stream);
                     if collecting.depth == self.stack.len() {
-                        debug!(
-                            "TokenCursor::next(): collected frame {:?} at depth {:?}",
-                            self.frame.modified_stream,
-                            self.stack.len()
-                        );
                         collecting.buf.push(
                             (PreexpTokenTree::Delimited(
                                     self.frame.span,

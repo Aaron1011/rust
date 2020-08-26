@@ -106,33 +106,6 @@ impl<'a> Parser<'a> {
         debug!("got AttributesData: {:?}", data);
         frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
         res
-       
-        /*if !attrs.is_empty() {
-            let target_start = if depth > self.token_cursor.stack.len() {
-                self.struct_span_err(self.token.span, "Lost frame!").emit();
-                panic!()
-            } else if depth == self.token_cursor.stack.len() {
-                cur_start
-            } else {
-                panic!("Stack grew?");
-            };
-
-            if target_start > self.token_cursor.frame.modified_stream.len() {
-                self.struct_span_err(self.token.span, "Weird stream");
-                panic!();
-            }
-
-            let target_tokens: Vec<_> = self.token_cursor.frame.modified_stream.drain(target_start..).collect();
-            let attr_tokens = attr_tokens.into_iter().map(|tokens| {
-                PreexpTokenStream::new(tokens).to_tokenstream()
-            });
-            let data = AttributesData {
-                attrs: attrs.into_iter().zip(attr_tokens).collect(),
-                target: PreexpTokenStream::new(target_tokens)
-            };
-            debug!("target_start={:?} attr data: {:?}", target_start, data);
-                self.token_cursor.frame.modified_stream.push((PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
-        }*/
     }
 
     /// Matches `attribute = # ! [ meta_item ]`.
