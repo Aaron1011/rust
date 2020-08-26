@@ -1,7 +1,7 @@
 use super::{Parser, PathStyle};
 use rustc_ast as ast;
 use rustc_ast::attr;
-use rustc_ast::token::{self, Nonterminal};
+use rustc_ast::token::{self, Nonterminal, TokenKind, Token};
 use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{error_code, PResult};
@@ -34,7 +34,7 @@ impl<'a> Parser<'a> {
         let mut attr_tokens = Vec::new();
         let mut just_parsed_doc_comment = false;
         loop {
-            let start_pos = self.token_cursor.collecting.as_ref().map(|collecting| collecting.buf.len());
+            let start_pos = self.token_cursor.frame.modified_stream.len();
 
             debug!("parse_outer_attributes: self.token={:?}", self.token);
             let parsed_attr = if self.check(&token::Pound) {
@@ -81,15 +81,35 @@ impl<'a> Parser<'a> {
             if !parsed_attr {
                 break;
             }
-            if let Some(collecting) = self.token_cursor.collecting.as_mut() {
-                let tokens: Vec<_> = collecting.buf.drain(start_pos.unwrap()..).collect();
-                attr_tokens.push(tokens);
+            if start_pos > self.token_cursor.frame.modified_stream.len() {
+                self.struct_span_err(self.token.span, "Weird!").emit();
+                panic!();
             }
+            let tokens: Vec<_> = self.token_cursor.frame.modified_stream.drain(start_pos..).collect();
+            attr_tokens.push(tokens);
         }
-        let target_start = self.token_cursor.collecting.as_ref().map(|collecting| collecting.buf.len());
+        let cur_start = self.token_cursor.frame.modified_stream.len();
+        let prev_start = self.token_cursor.stack.last().as_ref().map(|frame| frame.modified_stream.len());
+        let depth = self.token_cursor.stack.len();
+
         let res = f(self, attrs.clone());
-        if let Some(collecting) = self.token_cursor.collecting.as_mut() {
-            let target_tokens: Vec<_> = collecting.buf.drain(target_start.unwrap()..).collect();
+       
+        if !attrs.is_empty() {
+            let target_start = if depth > self.token_cursor.stack.len() {
+                self.struct_span_err(self.token.span, "Lost frame!").emit();
+                panic!()
+            } else if depth == self.token_cursor.stack.len() {
+                cur_start
+            } else {
+                panic!("Stack grew?");
+            };
+
+            if target_start > self.token_cursor.frame.modified_stream.len() {
+                self.struct_span_err(self.token.span, "Weird stream");
+                panic!();
+            }
+
+            let target_tokens: Vec<_> = self.token_cursor.frame.modified_stream.drain(target_start..).collect();
             let attr_tokens = attr_tokens.into_iter().map(|tokens| {
                 PreexpTokenStream::new(tokens).to_tokenstream()
             });
@@ -97,10 +117,9 @@ impl<'a> Parser<'a> {
                 attrs: attrs.into_iter().zip(attr_tokens).collect(),
                 target: PreexpTokenStream::new(target_tokens)
             };
-            debug!("target_start={:?} collecting={:?} attr data: {:?}", target_start, collecting, data);
-            collecting.buf.push((PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
+            debug!("target_start={:?} attr data: {:?}", target_start, data);
+                self.token_cursor.frame.modified_stream.push((PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
         }
-
         res
     }
 
