@@ -2,7 +2,7 @@ use super::{Parser, PathStyle};
 use rustc_ast as ast;
 use rustc_ast::attr;
 use rustc_ast::token::{self, Nonterminal, TokenKind, Token};
-use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint};
+use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint, TokenStream};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{error_code, PResult};
 use rustc_span::Span;
@@ -31,70 +31,87 @@ impl<'a> Parser<'a> {
         f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
     ) -> PResult<'a, R> {
         let mut attrs: Vec<ast::Attribute> = Vec::new();
-        let mut attr_tokens = Vec::new();
+        let mut attr_tokens: Vec<TokenStream> = Vec::new();
         let mut just_parsed_doc_comment = false;
-        loop {
-            let start_pos = self.token_cursor.frame.modified_stream.len();
 
+        let start_depth = self.token_cursor.stack.len();
+        let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
+        loop {
             debug!("parse_outer_attributes: self.token={:?}", self.token);
-            let parsed_attr = if self.check(&token::Pound) {
-                let inner_error_reason = if just_parsed_doc_comment {
-                    "an inner attribute is not permitted following an outer doc comment"
-                } else if !attrs.is_empty() {
-                    "an inner attribute is not permitted following an outer attribute"
+            let (parsed_attr, tokens) = self.collect_tokens(|this| {
+                if this.check(&token::Pound) {
+                    let inner_error_reason = if just_parsed_doc_comment {
+                        "an inner attribute is not permitted following an outer doc comment"
+                    } else if !attrs.is_empty() {
+                        "an inner attribute is not permitted following an outer attribute"
+                    } else {
+                        DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
+                    };
+                    let inner_parse_policy = InnerAttrPolicy::Forbidden {
+                        reason: inner_error_reason,
+                        saw_doc_comment: just_parsed_doc_comment,
+                        prev_attr_sp: attrs.last().map(|a| a.span),
+                    };
+                    let attr = this.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
+                    attrs.push(attr);
+                    just_parsed_doc_comment = false;
+                    Ok(true)
+                } else if let token::DocComment(comment_kind, attr_style, data) = this.token.kind {
+                    let attr = attr::mk_doc_comment(comment_kind, attr_style, data, this.token.span);
+                    if attr.style != ast::AttrStyle::Outer {
+                        this.sess
+                            .span_diagnostic
+                            .struct_span_err_with_code(
+                                this.token.span,
+                                "expected outer doc comment",
+                                error_code!(E0753),
+                            )
+                            .note(
+                                "inner doc comments like this (starting with \
+                                 `//!` or `/*!`) can only appear before items",
+                            )
+                            .emit();
+                    }
+                    attrs.push(attr);
+                    this.bump();
+                    just_parsed_doc_comment = true;
+                    Ok(true)
                 } else {
-                    DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
-                };
-                let inner_parse_policy = InnerAttrPolicy::Forbidden {
-                    reason: inner_error_reason,
-                    saw_doc_comment: just_parsed_doc_comment,
-                    prev_attr_sp: attrs.last().map(|a| a.span),
-                };
-                let attr = self.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
-                attrs.push(attr);
-                just_parsed_doc_comment = false;
-                true
-            } else if let token::DocComment(comment_kind, attr_style, data) = self.token.kind {
-                let attr = attr::mk_doc_comment(comment_kind, attr_style, data, self.token.span);
-                if attr.style != ast::AttrStyle::Outer {
-                    self.sess
-                        .span_diagnostic
-                        .struct_span_err_with_code(
-                            self.token.span,
-                            "expected outer doc comment",
-                            error_code!(E0753),
-                        )
-                        .note(
-                            "inner doc comments like this (starting with \
-                             `//!` or `/*!`) can only appear before items",
-                        )
-                        .emit();
+                    Ok(false)
                 }
-                attrs.push(attr);
-                self.bump();
-                just_parsed_doc_comment = true;
-                true
-            } else {
-                false
-            };
+            })?;
 
             if !parsed_attr {
                 break;
             }
-            if start_pos > self.token_cursor.frame.modified_stream.len() {
-                self.struct_span_err(self.token.span, "Weird!").emit();
-                panic!();
-            }
-            let tokens: Vec<_> = self.token_cursor.frame.modified_stream.drain(start_pos..).collect();
-            attr_tokens.push(tokens);
+            attr_tokens.push(tokens.to_tokenstream());
         }
-        let cur_start = self.token_cursor.frame.modified_stream.len();
-        let prev_start = self.token_cursor.stack.last().as_ref().map(|frame| frame.modified_stream.len());
-        let depth = self.token_cursor.stack.len();
 
-        let res = f(self, attrs.clone());
-       
+        let (res, target_tokens) = self.collect_tokens(|this| {
+            f(this, attrs.clone())
+        })?;
+
         if !attrs.is_empty() {
+            let new_depth = self.token_cursor.stack.len();
+            let frame = if new_depth == start_depth + 1 {
+                self.token_cursor.stack.last_mut().unwrap()
+            } else if new_depth == start_depth {
+                &mut self.token_cursor.frame
+            } else {
+                self.struct_span_err(self.token.span, "Weird depth").emit();
+                panic!();
+            };
+
+            let end = frame.modified_stream.len() - 1;
+            let data = AttributesData {
+                attrs: attrs.into_iter().zip(attr_tokens).collect(),
+                target: target_tokens
+            };
+            let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
+            frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
+        }
+       
+        /*if !attrs.is_empty() {
             let target_start = if depth > self.token_cursor.stack.len() {
                 self.struct_span_err(self.token.span, "Lost frame!").emit();
                 panic!()
@@ -119,8 +136,8 @@ impl<'a> Parser<'a> {
             };
             debug!("target_start={:?} attr data: {:?}", target_start, data);
                 self.token_cursor.frame.modified_stream.push((PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
-        }
-        res
+        }*/
+        Ok(res)
     }
 
     /// Matches `attribute = # ! [ meta_item ]`.
