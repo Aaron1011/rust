@@ -837,7 +837,7 @@ impl<'a> Parser<'a> {
                 // check that a comma comes after every field
                 if !ate_comma {
                     let err = this.struct_span_err(this.prev_token.span, "expected `,`");
-                    if let Some(mut delayed) = delayed_err.as_mut() {
+                    if let Some(delayed) = delayed_err.as_mut() {
                         delayed.emit();
                     }
                     return Err(err);
@@ -892,14 +892,14 @@ impl<'a> Parser<'a> {
                         // This way we avoid "pattern missing fields" errors afterwards.
                         // We delay this error until the end in order to have a span for a
                         // suggested fix.
-                        if let Some(mut delayed_err) = delayed_err.as_mut() {
+                        if let Some(delayed_err) = delayed_err.as_mut() {
                             delayed_err.emit();
                             return Err(err);
                         } else {
                             delayed_err = Some(err);
                         }
                     } else {
-                        if let Some(mut err) = delayed_err.as_mut() {
+                        if let Some(err) = delayed_err.as_mut() {
                             err.emit();
                         }
                         return Err(err);
@@ -909,7 +909,7 @@ impl<'a> Parser<'a> {
                 fields.push(match this.parse_pat_field(lo, attrs) {
                     Ok(field) => field,
                     Err(err) => {
-                        if let Some(mut delayed_err) = delayed_err.as_mut() {
+                        if let Some(delayed_err) = delayed_err.as_mut() {
                             delayed_err.emit();
                         }
                         return Err(err);
@@ -922,7 +922,7 @@ impl<'a> Parser<'a> {
                 Ok(true) => break,
                 Ok(false) => {},
                 Err(err) => {
-                    if let Some(mut delayed) = delayed_err.as_mut() {
+                    if let Some(delayed) = delayed_err.as_mut() {
                         delayed.emit();
                     }
                     return Err(err);
@@ -930,7 +930,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if let Some(mut err) = delayed_err.as_mut() {
+        if let Some(err) = delayed_err.as_mut() {
             if let Some(etc_span) = etc_span {
                 err.multipart_suggestion(
                     "move the `..` to the end of the field list",

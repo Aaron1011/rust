@@ -1000,12 +1000,6 @@ impl<'a> Parser<'a> {
                 // Consume close delimiter
                 self.bump();
 
-                /*let frame = mem::replace(
-                    &mut self.token_cursor.frame,
-                    self.token_cursor.stack.pop().unwrap(),
-                );
-                self.token = Token::new(TokenKind::CloseDelim(frame.delim), frame.span.close);
-                self.bump()*/;
                 TokenTree::Delimited(span, delim, PreexpTokenStream::new(stream).to_tokenstream())
             }
             token::CloseDelim(_) | token::Eof => unreachable!(),
@@ -1256,7 +1250,7 @@ impl<'a> Parser<'a> {
         // If we're not at EOF our current token wasn't actually consumed by
         // `f`, but it'll still be in our list that we pulled out. In that case
         // put it back.
-        let extra_token = if self.token != token::Eof {
+        if self.token != token::Eof {
             if let Some((PreexpTokenTree::Delimited(..), _)) = collected_tokens.last() {
                 None
             } else {
