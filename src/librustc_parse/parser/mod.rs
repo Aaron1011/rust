@@ -148,6 +148,7 @@ struct Collecting {
     /// Only tokens encountered at this depth will be recorded. See
     /// `TokenCursor::next` for more details.
     depth: usize,
+    pos: usize,
 }
 
 impl TokenCursorFrame {
@@ -1189,6 +1190,7 @@ impl<'a> Parser<'a> {
     /// This restriction shouldn't be an issue in practice,
     /// since this function is used to record the tokens for
     /// a parsed AST item, which always has matching delimiters.
+    #[track_caller]
     pub fn collect_tokens<R>(
         &mut self,
         f: impl FnOnce(&mut Self) -> PResult<'a, R>,
@@ -1226,11 +1228,14 @@ impl<'a> Parser<'a> {
             };
 
         // Record all tokens we parse when parsing this item.
-        debug!("collect_tokens: starting with {:?}", tokens);
+        debug!("collect_tokens({}): starting with {:?}", std::panic::Location::caller(), tokens);
 
+        let prev_pos = self.token_cursor.frame.tree_cursor.index();
 
         let prev_collecting =
-            self.token_cursor.collecting.replace(Collecting { buf: tokens, depth: prev_depth });
+            self.token_cursor.collecting.replace(Collecting { buf: tokens, depth: prev_depth, pos: prev_pos });
+
+        let duplicate_collect = prev_collecting.as_ref().map_or(false, |prev| prev.depth == prev_depth && prev.pos == prev_pos);
 
         let ret = f(self);
 
@@ -1271,8 +1276,13 @@ impl<'a> Parser<'a> {
             // this entire frame in the form of a `TokenTree::Delimited`,
             // so there is nothing else for us to do.
             if collecting.depth == prev_depth {
-                collecting.buf.extend(collected_tokens.iter().cloned());
-                collecting.buf.extend(extra_token);
+                if duplicate_collect {
+                    debug!("duplicate collect!");
+                    collecting.buf.extend(collected_tokens.iter().skip(1).cloned());
+                } else {
+                    collecting.buf.extend(collected_tokens.iter().cloned());
+                }
+                //collecting.buf.extend(extra_token);
                 debug!("collect_tokens: updating previous buf to {:?}", collecting);
             }
             self.token_cursor.collecting = Some(collecting)

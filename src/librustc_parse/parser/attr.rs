@@ -87,29 +87,31 @@ impl<'a> Parser<'a> {
             attr_tokens.push(tokens.to_tokenstream());
         }
 
+        if attrs.is_empty() {
+            return f(self, attrs);
+        }
+
         let (res, target_tokens) = self.collect_tokens(|this| {
             f(this, attrs.clone())
         })?;
 
-        if !attrs.is_empty() {
-            let new_depth = self.token_cursor.stack.len();
-            let frame = if new_depth == start_depth + 1 {
-                self.token_cursor.stack.last_mut().unwrap()
-            } else if new_depth == start_depth {
-                &mut self.token_cursor.frame
-            } else {
-                self.struct_span_err(self.token.span, "Weird depth").emit();
-                panic!();
-            };
+        let new_depth = self.token_cursor.stack.len();
+        let frame = if new_depth == start_depth + 1 {
+            self.token_cursor.stack.last_mut().unwrap()
+        } else if new_depth == start_depth {
+            &mut self.token_cursor.frame
+        } else {
+            self.struct_span_err(self.token.span, "Weird depth").emit();
+            panic!();
+        };
 
-            let end = frame.modified_stream.len() - 1;
-            let data = AttributesData {
-                attrs: attrs.into_iter().zip(attr_tokens).collect(),
-                target: target_tokens
-            };
-            let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
-            frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
-        }
+        let end = frame.modified_stream.len() - 1;
+        let data = AttributesData {
+            attrs: attrs.into_iter().zip(attr_tokens).collect(),
+            target: target_tokens
+        };
+        let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
+        frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
        
         /*if !attrs.is_empty() {
             let target_start = if depth > self.token_cursor.stack.len() {

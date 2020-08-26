@@ -406,6 +406,10 @@ impl Cursor {
     pub fn look_ahead(&self, n: usize) -> Option<TokenTree> {
         self.stream.0[self.index..].get(n).map(|(tree, _)| tree.clone())
     }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Encodable, Decodable, HashStable_Generic)]
