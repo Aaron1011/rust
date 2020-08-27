@@ -458,8 +458,8 @@ impl PreexpTokenStream {
                 vec![(TokenTree::Delimited(*span, *delim, stream.clone().to_tokenstream()), tree.1)].into_iter()
             }
             PreexpTokenTree::OuterAttributes(data) => {
-                eprintln!("Converting attributes: {:?}", data);
-                eprintln!("{}", std::backtrace::Backtrace::capture());
+                //eprintln!("Converting attributes: {:?}", data);
+                //eprintln!("{}", std::backtrace::Backtrace::capture());
                 /*let mut builder = TokenStreamBuilder::new();
                 for (_attr, tokens) in &data.attrs {
                     builder.push(tokens.clone());

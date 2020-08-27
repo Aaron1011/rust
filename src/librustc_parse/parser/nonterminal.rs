@@ -97,48 +97,70 @@ impl<'a> Parser<'a> {
         // which requires having captured tokens available. Since we cannot determine
         // in advance whether or not a proc-macro will be (transitively) invoked,
         // we always capture tokens for any `Nonterminal` which needs them.
-        self.force_capture_tokens(|this| {
-            Ok(match kind {
-                NonterminalKind::Item => match this.parse_item()? {
-                    Some(item) => token::NtItem(item),
-                    (None) => {
-                        return Err(this.struct_span_err(this.token.span, "expected an item keyword"));
+        Ok(match kind {
+            NonterminalKind::Item => match self.collect_tokens(|this| {
+                this.parse_item().map(|item| (item, Vec::new()))
+            })? {
+                (Some(mut item), tokens) => {
+                    // If we captured tokens during parsing (due to outer attributes),
+                    // use those.
+                    if item.tokens.is_none() {
+                        item.tokens = Some(tokens);
                     }
-                },
-                NonterminalKind::Block => token::NtBlock(this.parse_block()?),
-                NonterminalKind::Stmt => match this.parse_stmt()? {
-                    Some(s) => token::NtStmt(s),
-                    None => return Err(this.struct_span_err(this.token.span, "expected a statement")),
-                },
-                NonterminalKind::Pat => token::NtPat(this.parse_pat(None)?),
-                NonterminalKind::Expr => token::NtExpr(this.parse_expr()?),
-                NonterminalKind::Literal => token::NtLiteral(this.parse_literal_maybe_minus()?),
-                NonterminalKind::Ty => token::NtTy(this.parse_ty()?),
-                // this could be handled like a token, since it is one
-                NonterminalKind::Ident => {
-                    if let Some((ident, is_raw)) = get_macro_ident(&this.token) {
-                        this.bump();
-                        token::NtIdent(ident, is_raw)
-                    } else {
-                        let token_str = pprust::token_to_string(&this.token);
-                        let msg = &format!("expected ident, found {}", &token_str);
-                        return Err(this.struct_span_err(this.token.span, msg));
-                    }
+                    token::NtItem(item)
                 }
-                NonterminalKind::Path => token::NtPath(this.parse_path(PathStyle::Type)?),
-                NonterminalKind::Meta => token::NtMeta(P(this.parse_attr_item()?)),
-                NonterminalKind::TT => token::NtTT(this.parse_token_tree()),
-                NonterminalKind::Vis => token::NtVis(this.parse_visibility(FollowedByType::Yes)?),
-                NonterminalKind::Lifetime => {
-                    if this.check_lifetime() {
-                        token::NtLifetime(this.expect_lifetime().ident)
-                    } else {
-                        let token_str = pprust::token_to_string(&this.token);
-                        let msg = &format!("expected a lifetime, found `{}`", &token_str);
-                        return Err(this.struct_span_err(this.token.span, msg));
-                    }
+                (None, _) => {
+                    return Err(self.struct_span_err(self.token.span, "expected an item keyword"));
                 }
-            })
+            },
+            NonterminalKind::Block => token::NtBlock(self.parse_block()?),
+            NonterminalKind::Stmt => match self.parse_stmt()? {
+                Some(s) => token::NtStmt(s),
+                None => return Err(self.struct_span_err(self.token.span, "expected a statement")),
+            },
+            NonterminalKind::Pat => {
+                let (mut pat, tokens) = self.collect_tokens(|this| this.parse_pat(None).map(|pat| (pat, Vec::new())))?;
+                // We have have eaten an NtPat, which could already have tokens
+                if pat.tokens.is_none() {
+                    pat.tokens = Some(tokens.to_tokenstream());
+                }
+                token::NtPat(pat)
+            }
+            NonterminalKind::Expr => {
+                let (mut expr, tokens) = self.collect_tokens(|this| this.parse_expr().map(|expr| (expr, Vec::new())))?;
+                // If we captured tokens during parsing (due to outer attributes),
+                // use those.
+                if expr.tokens.is_none() {
+                    expr.tokens = Some(tokens.to_tokenstream());
+                }
+                token::NtExpr(expr)
+            }
+            NonterminalKind::Literal => token::NtLiteral(self.parse_literal_maybe_minus()?),
+            NonterminalKind::Ty => token::NtTy(self.parse_ty()?),
+            // this could be handled like a token, since it is one
+            NonterminalKind::Ident => {
+                if let Some((ident, is_raw)) = get_macro_ident(&self.token) {
+                    self.bump();
+                    token::NtIdent(ident, is_raw)
+                } else {
+                    let token_str = pprust::token_to_string(&self.token);
+                    let msg = &format!("expected ident, found {}", &token_str);
+                    return Err(self.struct_span_err(self.token.span, msg));
+                }
+            }
+            NonterminalKind::Path => token::NtPath(self.parse_path(PathStyle::Type)?),
+            NonterminalKind::Meta => token::NtMeta(P(self.parse_attr_item()?)),
+            NonterminalKind::TT => token::NtTT(self.parse_token_tree()),
+            NonterminalKind::Vis => token::NtVis(self.parse_visibility(FollowedByType::Yes)?),
+            NonterminalKind::Lifetime => {
+                if self.check_lifetime() {
+                    token::NtLifetime(self.expect_lifetime().ident)
+                } else {
+                    let token_str = pprust::token_to_string(&self.token);
+                    let msg = &format!("expected a lifetime, found `{}`", &token_str);
+                    return Err(self.struct_span_err(self.token.span, msg));
+                }
+            }
         })
     }
 }
