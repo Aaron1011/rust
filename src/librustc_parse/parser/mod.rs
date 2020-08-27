@@ -1184,6 +1184,15 @@ impl<'a> Parser<'a> {
         res
     }
 
+    #[track_caller]
+    pub fn collect_tokens<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> PResult<'a, (R, Vec<Attribute>)>,
+    ) -> PResult<'a, (R, PreexpTokenStream)> {
+        self.collect_tokens_keep_in_stream(true, f)
+    }
+
+
     /// Records all tokens consumed by the provided callback,
     /// including the current token. These tokens are collected
     /// into a `TokenStream`, and returned along with the result
@@ -1201,8 +1210,9 @@ impl<'a> Parser<'a> {
     /// since this function is used to record the tokens for
     /// a parsed AST item, which always has matching delimiters.
     #[track_caller]
-    pub fn collect_tokens<R>(
+    pub fn collect_tokens_keep_in_stream<R>(
         &mut self,
+        keep_in_stream: bool,
         f: impl FnOnce(&mut Self) -> PResult<'a, (R, Vec<Attribute>)>,
     ) -> PResult<'a, (R, PreexpTokenStream)> {
 
@@ -1313,8 +1323,10 @@ impl<'a> Parser<'a> {
         };
 
         if let Some(target_frame) = target_frame {
-            target_frame.modified_stream.extend(collected_tokens.clone().into_iter());
-            debug!("collect_tokens({}): extending stream with {:?}", std::panic::Location::caller(), collected_tokens);
+            if keep_in_stream {
+                target_frame.modified_stream.extend(collected_tokens.clone().into_iter());
+                debug!("collect_tokens({}): extending stream with {:?}", std::panic::Location::caller(), collected_tokens);
+            }
         }
 
         if let Some(mut collecting) = prev_collecting {

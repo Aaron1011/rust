@@ -40,7 +40,7 @@ impl<'a> Parser<'a> {
         let mut just_parsed_doc_comment = false;
 
         loop {
-            let (attr, tokens) = self.collect_tokens(|this| {
+            let (attr, tokens) = self.collect_tokens_keep_in_stream(false, |this| {
                 debug!("parse_outer_attributes: self.token={:?}", this.token);
                 if this.check(&token::Pound) {
                     let inner_error_reason = if just_parsed_doc_comment {
