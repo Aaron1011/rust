@@ -174,27 +174,32 @@ impl TokenCursor {
             } else if let Some(tree) = self.frame.tree_cursor.next_with_joint() {
                 if let Some(collecting) = &self.collecting {
                     if collecting.depth != self.stack.len() {
-                        let new_tree = match tree.0.clone() {
+                        if let TokenTree::Token(token) = tree.0.clone() {
+                            self.frame.modified_stream.push((PreexpTokenTree::Token(token), tree.1));
+                        }
+                        /*let new_tree = match tree.0.clone() {
                             TokenTree::Token(token) => PreexpTokenTree::Token(token),
                             TokenTree::Delimited(sp, delim, stream) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(stream))
                         };
-                        self.frame.modified_stream.push((new_tree, tree.1));
+                        self.frame.modified_stream.push((new_tree, tree.1));*/
                     }
                 }
                 tree
             } else if !self.frame.close_delim {
                 self.frame.close_delim = true;
                 TokenTree::close_tt(self.frame.span, self.frame.delim).into()
-            } else if let Some(frame) = self.stack.pop() {
+            } else if let Some(mut frame) = self.stack.pop() {
                 if let Some(collecting) = &mut self.collecting {
-                    if collecting.depth == self.stack.len() {
-                        collecting.buf.push(
-                            (PreexpTokenTree::Delimited(
+                    let new_tree =  (PreexpTokenTree::Delimited(
                                     self.frame.span,
                                     self.frame.delim,
                                     PreexpTokenStream::new(self.frame.modified_stream.clone()),
-                             ), IsJoint::NonJoint)
-                        );
+                             ), IsJoint::NonJoint);
+
+                    if collecting.depth == self.stack.len() {
+                        collecting.buf.push(new_tree);
+                    } else {
+                        frame.modified_stream.push(new_tree);
                     }
                 }
 
