@@ -446,23 +446,23 @@ impl<'a> Parser<'a> {
             _ => RangeLimits::Closed,
         };
         let op = AssocOp::from_token(&self.token);
-        let attrs = self.parse_or_use_outer_attributes(attrs)?;
-        let lo = self.token.span;
-        self.bump();
-        let (span, opt_end) = if self.is_at_start_of_range_notation_rhs() {
-            // RHS must be parsed with more associativity than the dots.
-            self.parse_assoc_expr_with(op.unwrap().precedence() + 1, LhsExpr::NotYetParsed)
-                .map(|x| (lo.to(x.span), Some(x)))?
-        } else {
-            (lo, None)
-        };
-        Ok(self.mk_expr(span, self.mk_range(None, opt_end, limits)?, attrs))
+        self.parse_or_use_outer_attributes(attrs, |this, attrs| {
+            let lo = this.token.span;
+            this.bump();
+            let (span, opt_end) = if this.is_at_start_of_range_notation_rhs() {
+                // RHS must be parsed with more associativity than the dots.
+                this.parse_assoc_expr_with(op.unwrap().precedence() + 1, LhsExpr::NotYetParsed)
+                    .map(|x| (lo.to(x.span), Some(x)))?
+            } else {
+                (lo, None)
+            };
+            Ok(this.mk_expr(span, this.mk_range(None, opt_end, limits)?, attrs))
+        })
     }
 
     /// Parses a prefix-unary-operator expr.
     fn parse_prefix_expr(&mut self, attrs: Option<AttrVec>) -> PResult<'a, P<Expr>> {
-        let attrs = self.parse_or_use_outer_attributes(attrs)?;
-        self.maybe_collect_tokens(!attrs.is_empty(), |this| {
+        self.parse_or_use_outer_attributes(attrs, |this, attrs| {
             let lo = this.token.span;
             // Note: when adding new unary operators, don't forget to adjust TokenKind::can_begin_expr()
             let (hi, ex) = match this.token.uninterpolate().kind {
@@ -749,10 +749,11 @@ impl<'a> Parser<'a> {
 
     /// Parses `a.b` or `a(13)` or `a[4]` or just `a`.
     fn parse_dot_or_call_expr(&mut self, attrs: Option<AttrVec>) -> PResult<'a, P<Expr>> {
-        let attrs = self.parse_or_use_outer_attributes(attrs)?;
-        let base = self.parse_bottom_expr();
-        let (span, base) = self.interpolated_or_expr_span(base)?;
-        self.parse_dot_or_call_expr_with(base, span, attrs)
+        self.parse_or_use_outer_attributes(attrs, |this, attrs| {
+            let base = this.parse_bottom_expr();
+            let (span, base) = this.interpolated_or_expr_span(base)?;
+            this.parse_dot_or_call_expr_with(base, span, attrs)
+        })
     }
 
     pub(super) fn parse_dot_or_call_expr_with(
@@ -1079,7 +1080,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn maybe_collect_tokens(
+    /*fn maybe_collect_tokens(
         &mut self,
         has_outer_attrs: bool,
         f: impl FnOnce(&mut Self) -> PResult<'a, P<Expr>>,
@@ -1092,7 +1093,7 @@ impl<'a> Parser<'a> {
         } else {
             f(self)
         }
-    }
+    }*/
 
     fn parse_lit_expr(&mut self, attrs: AttrVec) -> PResult<'a, P<Expr>> {
         let lo = self.token.span;

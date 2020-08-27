@@ -25,16 +25,13 @@ pub(super) const DEFAULT_INNER_ATTR_FORBIDDEN: InnerAttrPolicy<'_> = InnerAttrPo
 };
 
 impl<'a> Parser<'a> {
-    /// Parses attributes that appear before an item.
-    pub(super) fn parse_outer_attributes<R>(
-        &mut self,
-        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
-    ) -> PResult<'a, R> {
+    fn has_any_attributes(&self) -> bool {
+        self.token == token::Pound || matches!(self.token.kind, token::DocComment(..))
+    }
+
+    fn parse_outer_attributes_(&mut self) -> PResult<'a, Vec<ast::Attribute>> {
         let mut attrs: Vec<ast::Attribute> = Vec::new();
         let mut just_parsed_doc_comment = false;
-
-        let start_depth = self.token_cursor.stack.len();
-        let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
 
         loop {
             debug!("parse_outer_attributes: self.token={:?}", self.token);
@@ -77,35 +74,65 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
+        Ok(attrs)
+    }
 
-        let res = f(self, attrs.clone());
-        if attrs.is_empty() {
-            return res;
+    pub(super) fn parse_outer_attributes<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
+    ) -> PResult<'a, R> {
+        self.parse_outer_attributes_with_tokens(f).map(|(res, _tokens)| res)
+    }
+
+
+    /// Parses attributes that appear before an item.
+    pub(super) fn parse_outer_attributes_with_tokens<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
+    ) -> PResult<'a, (R, Option<PreexpTokenStream>)> {
+
+        if !self.has_any_attributes() {
+            let res = f(self, Vec::new())?;
+            return Ok((res, None))
         }
 
-        let new_depth = self.token_cursor.stack.len();
-        let frame = if new_depth == start_depth + 1 {
-            self.token_cursor.stack.last_mut().unwrap()
-        } else if new_depth == start_depth {
-            &mut self.token_cursor.frame
-        } else {
-            self.struct_span_err(self.token.span, "Weird depth").emit();
-            panic!();
-        };
-        let end = if frame.close_delim {
-            frame.modified_stream.len()
-        } else {
-            frame.modified_stream.len() - 1
-        };
+        let (res, tokens) = self.collect_tokens(|this| {
+            //let start_depth = self.token_cursor.stack.len();
+            //let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
 
-        let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
-        let data = AttributesData {
-            attrs,
-            tokens: PreexpTokenStream::new(all_tokens)
-        };
-        debug!("got AttributesData: {:?}", data);
-        frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
-        res
+            let attrs = this.parse_outer_attributes_()?;
+
+            let res = f(this, attrs.clone());
+            Ok((res, attrs))
+        })?;
+        res.map(|inner| (inner, Some(tokens)))
+
+
+
+            /*let new_depth = self.token_cursor.stack.len();
+            let frame = if new_depth == start_depth + 1 {
+                self.token_cursor.stack.last_mut().unwrap()
+            } else if new_depth == start_depth {
+                &mut self.token_cursor.frame
+            } else {
+                self.struct_span_err(self.token.span, "Weird depth").emit();
+                panic!();
+            };
+            let end = if frame.close_delim {
+                frame.modified_stream.len()
+            } else {
+                frame.modified_stream.len() - 1
+            };*/
+
+            /*let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
+            let data = AttributesData {
+                attrs,
+                tokens: PreexpTokenStream::new(all_tokens)
+            };
+            debug!("got AttributesData: {:?}", data);
+            frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
+            Ok(res)
+        })*/
     }
 
     /// Matches `attribute = # ! [ meta_item ]`.

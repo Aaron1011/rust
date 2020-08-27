@@ -15,9 +15,9 @@ pub use path::PathStyle;
 
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, DelimToken, Token, TokenKind};
-use rustc_ast::tokenstream::{self, DelimSpan, TokenStream, TokenTree, TreeAndJoint, PreexpTokenStream, PreexpTokenTree, IsJoint};
+use rustc_ast::tokenstream::{self, DelimSpan, TokenStream, TokenTree, TreeAndJoint, PreexpTokenStream, PreexpTokenTree, IsJoint, AttributesData};
 use rustc_ast::DUMMY_NODE_ID;
-use rustc_ast::{self as ast, AttrStyle, AttrVec, Const, CrateSugar, Extern, Unsafe};
+use rustc_ast::{self as ast, Attribute, AttrStyle, AttrVec, Const, CrateSugar, Extern, Unsafe};
 use rustc_ast::{Async, MacArgs, MacDelimiter, Mutability, StrLit, Visibility, VisibilityKind};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{struct_span_err, Applicability, DiagnosticBuilder, FatalError, PResult};
@@ -106,6 +106,7 @@ pub struct Parser<'a> {
     pub last_type_ascription: Option<(Span, bool /* likely path typo */)>,
     /// If present, this `Parser` is not parsing Rust code but rather a macro call.
     subparser_name: Option<&'static str>,
+    force_capture_tokens: bool,
 }
 
 impl<'a> Drop for Parser<'a> {
@@ -171,11 +172,15 @@ impl TokenCursor {
                 self.frame.open_delim = true;
                 TokenTree::open_tt(self.frame.span, self.frame.delim).into()
             } else if let Some(tree) = self.frame.tree_cursor.next_with_joint() {
-                let new_tree = match tree.0.clone() {
-                    TokenTree::Token(token) => PreexpTokenTree::Token(token),
-                    TokenTree::Delimited(sp, delim, stream) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(stream))
-                };
-                self.frame.modified_stream.push((new_tree, tree.1));
+                if let Some(collecting) = &self.collecting {
+                    if collecting.depth != self.stack.len() {
+                        let new_tree = match tree.0.clone() {
+                            TokenTree::Token(token) => PreexpTokenTree::Token(token),
+                            TokenTree::Delimited(sp, delim, stream) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(stream))
+                        };
+                        self.frame.modified_stream.push((new_tree, tree.1));
+                    }
+                }
                 tree
             } else if !self.frame.close_delim {
                 self.frame.close_delim = true;
@@ -386,6 +391,7 @@ impl<'a> Parser<'a> {
             last_unexpected_token_span: None,
             last_type_ascription: None,
             subparser_name,
+            force_capture_tokens: false
         };
 
         // Make parser point to the first token.
@@ -964,14 +970,15 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn parse_or_use_outer_attributes(
+    fn parse_or_use_outer_attributes<R>(
         &mut self,
         already_parsed_attrs: Option<AttrVec>,
-    ) -> PResult<'a, AttrVec> {
+        f: impl FnOnce(&mut Self, AttrVec) -> PResult<'a, R>
+    ) -> PResult<'a, R> {
         if let Some(attrs) = already_parsed_attrs {
-            Ok(attrs)
+            f(self, attrs)
         } else {
-            self.parse_outer_attributes(|_this, attrs| Ok(attrs)).map(|a| a.into())
+            self.parse_outer_attributes(|this, attrs| f(this, attrs.into()))
         }
     }
 
@@ -1161,6 +1168,16 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn force_capture_tokens<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> PResult<'a, R>,
+    ) -> PResult<'a, R> {
+        let old_force = std::mem::replace(&mut self.force_capture_tokens, true);
+        let res = f(self);
+        self.force_capture_tokens = old_force;
+        res
+    }
+
     /// Records all tokens consumed by the provided callback,
     /// including the current token. These tokens are collected
     /// into a `TokenStream`, and returned along with the result
@@ -1180,7 +1197,7 @@ impl<'a> Parser<'a> {
     #[track_caller]
     pub fn collect_tokens<R>(
         &mut self,
-        f: impl FnOnce(&mut Self) -> PResult<'a, R>,
+        f: impl FnOnce(&mut Self) -> PResult<'a, (R, Vec<Attribute>)>,
     ) -> PResult<'a, (R, PreexpTokenStream)> {
 
         // We need special handling for the case where `collect_tokens` is called
@@ -1232,10 +1249,11 @@ impl<'a> Parser<'a> {
             let msg = "our vector went away?";
             debug!("collect_tokens: {}", msg);
             self.sess.span_diagnostic.delay_span_bug(self.token.span, &msg);
+            let (ret, _attrs) = ret?;
             // This can happen due to a bad interaction of two unrelated recovery mechanisms
             // with mismatched delimiters *and* recovery lookahead on the likely typo
             // `pub ident(` (#62895, different but similar to the case above).
-            return Ok((ret?, PreexpTokenStream::default()));
+            return Ok((ret, PreexpTokenStream::default()));
         };
 
         debug!("collect_tokens: got raw tokens {:?}", collected_tokens);
@@ -1253,6 +1271,18 @@ impl<'a> Parser<'a> {
             None
         };
 
+        if let Ok((_, attrs)) = ret.as_ref() {
+            if !attrs.is_empty() {
+                let data = AttributesData {
+                    attrs: attrs.clone(),
+                    tokens: PreexpTokenStream::new(collected_tokens)
+                };
+                let tree = (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint);
+                collected_tokens = vec![tree];
+            }
+        }
+        self.token_cursor.frame.modified_stream.extend(collected_tokens.clone().into_iter());
+
         if let Some(mut collecting) = prev_collecting {
             // If we were previously collecting at the same depth,
             // then the previous call to `collect_tokens` needs to see
@@ -1265,7 +1295,7 @@ impl<'a> Parser<'a> {
             if collecting.depth == prev_depth {
                 if duplicate_collect {
                     debug!("duplicate collect!");
-                    collecting.buf.extend(collected_tokens.iter().skip(1).cloned());
+                    collecting.buf = collected_tokens.clone();
                 } else {
                     collecting.buf.extend(collected_tokens.iter().cloned());
                 }
@@ -1275,7 +1305,7 @@ impl<'a> Parser<'a> {
             self.token_cursor.collecting = Some(collecting)
         }
 
-        Ok((ret?, PreexpTokenStream::new(collected_tokens)))
+        Ok((ret?.0, PreexpTokenStream::new(collected_tokens)))
     }
 
     /// `::{` or `::*`

@@ -106,45 +106,8 @@ impl<'a> Parser<'a> {
             Some(item.into_inner())
         });
 
-        let mut unclosed_delims = vec![];
-        let has_attrs = !attrs.is_empty();
-        let parse_item = |this: &mut Self| {
-            let item = this.parse_item_common_(attrs, mac_allowed, attrs_allowed, req_name);
-            unclosed_delims.append(&mut this.unclosed_delims);
-            item
-        };
-
-        let (mut item, tokens) = if has_attrs {
-            let (item, tokens) = self.collect_tokens(parse_item)?;
-            (item, Some(tokens))
-        } else {
-            (parse_item(self)?, None)
-        };
-
-        self.unclosed_delims.append(&mut unclosed_delims);
-
-        // Once we've parsed an item and recorded the tokens we got while
-        // parsing we may want to store `tokens` into the item we're about to
-        // return. Note, though, that we specifically didn't capture tokens
-        // related to outer attributes. The `tokens` field here may later be
-        // used with procedural macros to convert this item back into a token
-        // stream, but during expansion we may be removing attributes as we go
-        // along.
-        //
-        // If we've got inner attributes then the `tokens` we've got above holds
-        // these inner attributes. If an inner attribute is expanded we won't
-        // actually remove it from the token stream, so we'll just keep yielding
-        // it (bad!). To work around this case for now we just avoid recording
-        // `tokens` if we detect any inner attributes. This should help keep
-        // expansion correct, but we should fix this bug one day!
-        if let Some(tokens) = tokens {
-            if let Some(item) = &mut item {
-                if !item.attrs.iter().any(|attr| attr.style == AttrStyle::Inner) {
-                    item.tokens = Some(tokens);
-                }
-            }
-        }
-        Ok(item)
+        let item = self.parse_item_common_(attrs, mac_allowed, attrs_allowed, req_name);
+        item
     }
 
     fn parse_item_common_(
