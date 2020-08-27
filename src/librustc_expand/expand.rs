@@ -1056,11 +1056,12 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
 
     fn find_attr_invoc(
         &self,
-        has_attrs: &mut (impl HasAttrs + std::fmt::Debug),
+        attr_target: &mut (impl HasAttrs + std::fmt::Debug),
         after_derive: &mut bool,
     ) -> Option<ast::Attribute> {
         let mut attr = None;
-        has_attrs.visit_attrs(|mut attrs| {
+        let has_attrs = !attr_target.attrs().is_empty();
+        attr_target.visit_attrs(|mut attrs| {
             attrs
             .iter()
             .position(|a| {
@@ -1072,31 +1073,33 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
             .map(|i| attr = Some(attrs.remove(i)));
         });
         let mut token_attr = None;
-        has_attrs.visit_tokens(|tokens| {
-            if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
-                let mut data = data.clone();
-                tracing::debug!("attributes before: {:?}", data.attrs);
-                token_attr = data.attrs
-                    .iter()
-                    .position(|a| {
-                        !self.cx.sess.is_attr_known(a) && !is_builtin_attr(a)
-                    })
-                    .map(|i| data.attrs.remove(i));
+        if has_attrs {
+            attr_target.visit_tokens(|tokens| {
+                if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
+                    let mut data = data.clone();
+                    tracing::debug!("attributes before: {:?}", data.attrs);
+                    token_attr = data.attrs
+                        .iter()
+                        .position(|a| {
+                            !self.cx.sess.is_attr_known(a) && !is_builtin_attr(a)
+                        })
+                        .map(|i| data.attrs.remove(i));
 
 
-                if token_attr.is_some() != attr.is_some() {
-                    panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} tokens={:?}", attr, token_attr, tokens);
+                    if token_attr.is_some() != attr.is_some() {
+                        panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} tokens={:?}", attr, token_attr, tokens);
+                    }
+
+                    tracing::debug!("remaining attributes: {:?}", data.attrs);
+                    *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+                } else {
+                    panic!("Unexpected tokens {:?}", tokens);
                 }
-
-                tracing::debug!("remaining attributes: {:?}", data.attrs);
-                *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
-            } else {
-                panic!("Unexpected tokens {:?}", tokens);
-            }
-        });
+            });
+        }
 
         if token_attr.is_some() != attr.is_some() {
-            panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} target={:?}", attr, token_attr, has_attrs);
+            panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} target={:?}", attr, token_attr, attr_target);
         }
 
         if let Some(attr) = &attr {
