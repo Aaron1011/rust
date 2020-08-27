@@ -660,7 +660,16 @@ impl HasAttrs for StmtKind {
         }
     }
     fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
-        // FIXME: What do we need to do here?
+        match self {
+            StmtKind::Local(local) => local.visit_tokens(f),
+            StmtKind::Expr(expr) | StmtKind::Semi(expr) => expr.visit_tokens(f),
+            // FIXME: Is this correct?
+            StmtKind::Empty | StmtKind::Item(..) => {}
+            StmtKind::MacCall(mac) => {
+                mac.deref_mut().attrs.visit_tokens(f)
+            }
+        }
+
     }
 }
 
@@ -709,6 +718,22 @@ impl HasAttrs for Item {
     }
 }
 
+impl HasAttrs for Local {
+    fn attrs(&self) -> &[Attribute] {
+        &self.attrs
+    }
+
+    fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
+        self.attrs.visit_attrs(f);
+    }
+
+    fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
+        if let Some(tokens) = self.tokens.as_mut() {
+            f(tokens)
+        }
+    }
+}
+
 macro_rules! derive_has_attrs {
     ($($ty:path),*) => { $(
         impl HasAttrs for $ty {
@@ -725,6 +750,6 @@ macro_rules! derive_has_attrs {
 }
 
 derive_has_attrs! {
-    Local, ast::AssocItem, ast::ForeignItem, ast::StructField, ast::Arm,
+    ast::AssocItem, ast::ForeignItem, ast::StructField, ast::Arm,
     ast::Field, ast::FieldPat, ast::Variant, ast::Param, GenericParam
 }
