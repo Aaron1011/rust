@@ -496,7 +496,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                             panic!("Unexpected tokens {:?}", tokens);
                         }
                     } else {
-                        panic!("Derive on non-item {:?}", item);
+                        //panic!("Derive on non-item {:?}", item);
                     }
                     tracing::debug!("item after: {:?}", item);
 
