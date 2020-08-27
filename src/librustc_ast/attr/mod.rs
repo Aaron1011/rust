@@ -686,54 +686,6 @@ impl HasAttrs for Stmt {
     }
 }
 
-impl HasAttrs for Expr {
-    fn attrs(&self) -> &[Attribute] {
-        &self.attrs
-    }
-
-    fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
-        self.attrs.visit_attrs(f);
-    }
-
-    fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
-        if let Some(tokens) = self.tokens.as_mut() {
-            f(tokens)
-        }
-    }
-}
-
-impl HasAttrs for Item {
-    fn attrs(&self) -> &[Attribute] {
-        &self.attrs
-    }
-
-    fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
-        self.attrs.visit_attrs(f);
-    }
-
-    fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
-        if let Some(tokens) = self.tokens.as_mut() {
-            f(tokens)
-        }
-    }
-}
-
-impl HasAttrs for Local {
-    fn attrs(&self) -> &[Attribute] {
-        &self.attrs
-    }
-
-    fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
-        self.attrs.visit_attrs(f);
-    }
-
-    fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
-        if let Some(tokens) = self.tokens.as_mut() {
-            f(tokens)
-        }
-    }
-}
-
 macro_rules! derive_has_attrs {
     ($($ty:path),*) => { $(
         impl HasAttrs for $ty {
@@ -749,7 +701,31 @@ macro_rules! derive_has_attrs {
     )* }
 }
 
+macro_rules! derive_has_attrs_with_tokens {
+    ($($ty:path),*) => { $(
+        impl HasAttrs for $ty {
+            fn attrs(&self) -> &[Attribute] {
+                &self.attrs
+            }
+
+            fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
+                self.attrs.visit_attrs(f);
+            }
+
+            fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
+                if let Some(tokens) = self.tokens.as_mut() {
+                    f(tokens)
+                }
+            }
+        }
+    )* }
+}
+
 derive_has_attrs! {
-    ast::AssocItem, ast::ForeignItem, ast::StructField, ast::Arm,
+    ast::StructField, ast::Arm,
     ast::Field, ast::FieldPat, ast::Variant, ast::Param, GenericParam
+}
+
+derive_has_attrs_with_tokens! {
+    Expr, Item, Local, ast::AssocItem, ast::ForeignItem
 }
