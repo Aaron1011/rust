@@ -267,9 +267,13 @@ impl<'a> StripUnconfigured<'a> {
                     data.attrs.flat_map_in_place(|(attr, tokens)| {
                         self.process_cfg_attr(attr, tokens)
                     });
-                    let processed: Vec<_> = self.in_cfg(data.attrs.iter().map(|(attr, _tokens)| attr)).then_some(data.tokens)
-                        .iter().flat_map(|stream| stream.0.iter().cloned()).collect();
-                    processed.into_iter()
+
+                    if self.in_cfg(data.attrs.iter().map(|(attr, _tokens)| attr)) {
+                        data.tokens = self.configure_tokens(data.tokens);
+                        vec![(PreexpTokenTree::OuterAttributes(data), tree.1)].into_iter()
+                    } else {
+                        vec![].into_iter()
+                    }
                 }
                 PreexpTokenTree::Delimited(sp, delim, inner) => {
                     vec![(PreexpTokenTree::Delimited(sp, delim, self.configure_tokens(inner)), tree.1)].into_iter()

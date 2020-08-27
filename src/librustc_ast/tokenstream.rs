@@ -21,6 +21,7 @@ use rustc_macros::HashStable_Generic;
 use rustc_span::{Span, DUMMY_SP};
 use smallvec::{smallvec, SmallVec};
 
+use std::backtrace::Backtrace;
 use std::{iter, mem};
 
 /// When the main rust parser encounters a syntax-extension invocation, it
@@ -436,8 +437,16 @@ impl DelimSpan {
     }
 }
 
+#[derive(Clone, Default, Encodable, Decodable)]
+struct DisplayStr(String);
+impl std::fmt::Debug for DisplayStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, Debug, Default, Encodable, Decodable)]
-pub struct PreexpTokenStream(pub Lrc<Vec<(PreexpTokenTree, IsJoint)>>);
+pub struct PreexpTokenStream(pub Lrc<Vec<(PreexpTokenTree, IsJoint)>>, DisplayStr);
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub enum PreexpTokenTree {
@@ -448,7 +457,12 @@ pub enum PreexpTokenTree {
 
 impl PreexpTokenStream {
     pub fn new(tokens: Vec<(PreexpTokenTree, IsJoint)>) -> PreexpTokenStream {
-        PreexpTokenStream(Lrc::new(tokens))
+        /*if let Some((PreexpTokenTree::Token(token), _)) = tokens.first() {
+            if token.kind == token::Pound {
+                panic!("Constructed weird attributes: {:?}", tokens);
+            }
+        }*/
+        PreexpTokenStream(Lrc::new(tokens), DisplayStr(String::new()))
     }
 
     pub fn to_tokenstream(self) -> TokenStream {

@@ -32,7 +32,7 @@ impl<'a> Parser<'a> {
     fn parse_stmt_without_recovery(&mut self) -> PResult<'a, Option<Stmt>> {
         maybe_whole!(self, NtStmt, |x| Some(x));
 
-        self.parse_outer_attributes(|this, attrs| {
+        let (mut stmt, tokens) = self.parse_outer_attributes_with_tokens(|this, attrs| {
             let lo = this.token.span;
 
             let stmt = if this.eat_keyword(kw::Let) {
@@ -69,7 +69,11 @@ impl<'a> Parser<'a> {
                 return Ok(None);
             };
             Ok(Some(stmt))
-        })
+        })?;
+        if let Some(Stmt { kind: StmtKind::Item(item), .. }) = stmt.as_mut() {
+            item.tokens = tokens;
+        }
+        Ok(stmt)
     }
 
     fn parse_stmt_path_start(&mut self, lo: Span, attrs: Vec<Attribute>) -> PResult<'a, Stmt> {

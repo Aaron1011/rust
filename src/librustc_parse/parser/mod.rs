@@ -1278,6 +1278,20 @@ impl<'a> Parser<'a> {
                 };
                 let tree = (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint);
                 collected_tokens = vec![tree];
+            } else {
+                if let Some((PreexpTokenTree::Token(token), _)) = collected_tokens.first() {
+                    if token.kind == token::Pound {
+                        for tree in &collected_tokens {
+                            if let (PreexpTokenTree::Token(inner), _) = tree {
+                                if let TokenKind::Ident(sym, _) = inner.kind {
+                                    if sym.as_str() == "struct" {
+                                        panic!("Constructed weird attributes: {:?}", collected_tokens);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         self.token_cursor.frame.modified_stream.extend(collected_tokens.clone().into_iter());
