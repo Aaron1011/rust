@@ -974,11 +974,18 @@ impl<'a> Parser<'a> {
         &mut self,
         already_parsed_attrs: Option<AttrVec>,
         f: impl FnOnce(&mut Self, AttrVec) -> PResult<'a, R>
-    ) -> PResult<'a, R> {
+    ) -> PResult<'a, (R, Option<PreexpTokenStream>)> {
         if let Some(attrs) = already_parsed_attrs {
-            f(self, attrs)
+            if attrs.is_empty() {
+                return f(self, attrs).map(|res| (res, None))
+            } else {
+                let (res, tokens) = self.collect_tokens(|this| {
+                    f(this, attrs.clone()).map(|res| (res, attrs.to_vec()))
+                })?;
+                Ok((res, Some(tokens)))
+            }
         } else {
-            self.parse_outer_attributes(|this, attrs| f(this, attrs.into()))
+            self.parse_outer_attributes_with_tokens(|this, attrs| f(this, attrs.into()))
         }
     }
 

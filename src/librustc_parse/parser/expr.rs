@@ -446,7 +446,7 @@ impl<'a> Parser<'a> {
             _ => RangeLimits::Closed,
         };
         let op = AssocOp::from_token(&self.token);
-        self.parse_or_use_outer_attributes(attrs, |this, attrs| {
+        let (expr, tokens) = self.parse_or_use_outer_attributes(attrs, |this, attrs| {
             let lo = this.token.span;
             this.bump();
             let (span, opt_end) = if this.is_at_start_of_range_notation_rhs() {
@@ -457,12 +457,13 @@ impl<'a> Parser<'a> {
                 (lo, None)
             };
             Ok(this.mk_expr(span, this.mk_range(None, opt_end, limits)?, attrs))
-        })
+        })?;
+        Ok(expr)
     }
 
     /// Parses a prefix-unary-operator expr.
     fn parse_prefix_expr(&mut self, attrs: Option<AttrVec>) -> PResult<'a, P<Expr>> {
-        self.parse_or_use_outer_attributes(attrs, |this, attrs| {
+        let (mut expr, tokens) = self.parse_or_use_outer_attributes(attrs, |this, attrs| {
             let lo = this.token.span;
             // Note: when adding new unary operators, don't forget to adjust TokenKind::can_begin_expr()
             let (hi, ex) = match this.token.uninterpolate().kind {
@@ -478,7 +479,9 @@ impl<'a> Parser<'a> {
                 _ => return this.parse_dot_or_call_expr(Some(attrs)),
             }?;
             Ok(this.mk_expr(lo.to(hi), ex, attrs))
-        })
+        })?;
+        expr.tokens = tokens.map(|t| t.to_tokenstream());
+        Ok(expr)
     }
 
     fn parse_prefix_expr_common(&mut self, lo: Span) -> PResult<'a, (Span, P<Expr>)> {
@@ -749,11 +752,12 @@ impl<'a> Parser<'a> {
 
     /// Parses `a.b` or `a(13)` or `a[4]` or just `a`.
     fn parse_dot_or_call_expr(&mut self, attrs: Option<AttrVec>) -> PResult<'a, P<Expr>> {
-        self.parse_or_use_outer_attributes(attrs, |this, attrs| {
+        let (expr, _tokens) = self.parse_or_use_outer_attributes(attrs, |this, attrs| {
             let base = this.parse_bottom_expr();
             let (span, base) = this.interpolated_or_expr_span(base)?;
             this.parse_dot_or_call_expr_with(base, span, attrs)
-        })
+        })?;
+        Ok(expr)
     }
 
     pub(super) fn parse_dot_or_call_expr_with(
