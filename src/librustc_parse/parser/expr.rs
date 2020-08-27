@@ -446,7 +446,7 @@ impl<'a> Parser<'a> {
             _ => RangeLimits::Closed,
         };
         let op = AssocOp::from_token(&self.token);
-        let (expr, tokens) = self.parse_or_use_outer_attributes(attrs, |this, attrs| {
+        let (mut expr, tokens) = self.parse_or_use_outer_attributes(attrs, |this, attrs| {
             let lo = this.token.span;
             this.bump();
             let (span, opt_end) = if this.is_at_start_of_range_notation_rhs() {
@@ -458,6 +458,7 @@ impl<'a> Parser<'a> {
             };
             Ok(this.mk_expr(span, this.mk_range(None, opt_end, limits)?, attrs))
         })?;
+        expr.tokens = tokens;
         Ok(expr)
     }
 
@@ -476,7 +477,7 @@ impl<'a> Parser<'a> {
                 token::Ident(..) if this.is_mistaken_not_ident_negation() => {
                     this.recover_not_expr(lo)
                 }
-                _ => return this.parse_dot_or_call_expr(Some(attrs)),
+                _ => return this.parse_dot_or_call_expr(attrs),
             }?;
             Ok(this.mk_expr(lo.to(hi), ex, attrs))
         })?;
@@ -751,13 +752,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses `a.b` or `a(13)` or `a[4]` or just `a`.
-    fn parse_dot_or_call_expr(&mut self, attrs: Option<AttrVec>) -> PResult<'a, P<Expr>> {
-        let (expr, _tokens) = self.parse_or_use_outer_attributes(attrs, |this, attrs| {
-            let base = this.parse_bottom_expr();
-            let (span, base) = this.interpolated_or_expr_span(base)?;
-            this.parse_dot_or_call_expr_with(base, span, attrs)
-        })?;
-        Ok(expr)
+    fn parse_dot_or_call_expr(&mut self, attrs: AttrVec) -> PResult<'a, P<Expr>> {
+        let base = self.parse_bottom_expr();
+        let (span, base) = self.interpolated_or_expr_span(base)?;
+        self.parse_dot_or_call_expr_with(base, span, attrs)
     }
 
     pub(super) fn parse_dot_or_call_expr_with(

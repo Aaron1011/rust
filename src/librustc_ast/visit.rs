@@ -692,8 +692,8 @@ pub fn walk_stmt<'a, V: Visitor<'a>>(visitor: &mut V, statement: &'a Stmt) {
         StmtKind::Expr(ref expr) | StmtKind::Semi(ref expr) => visitor.visit_expr(expr),
         StmtKind::Empty => {}
         StmtKind::MacCall(ref mac) => {
-            let (ref mac, _, ref attrs) = **mac;
-            visitor.visit_mac(mac);
+            let MacCallStmt { call, style: _, attrs, tokens: _ } = &**mac;
+            visitor.visit_mac(call);
             for attr in attrs.iter() {
                 visitor.visit_attribute(attr);
             }

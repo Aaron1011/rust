@@ -13,7 +13,7 @@ use rustc_ast::token;
 use rustc_ast::tokenstream::{TokenStream, PreexpTokenStream, PreexpTokenTree};
 use rustc_ast::visit::{self, AssocCtxt, Visitor};
 use rustc_ast::{self as ast, AttrItem, Block, LitKind, NodeId, PatKind, Path};
-use rustc_ast::{ItemKind, MacArgs, MacStmtStyle, StmtKind};
+use rustc_ast::{ItemKind, MacArgs, MacStmtStyle, StmtKind, MacCallStmt};
 use rustc_ast_pretty::pprust;
 use rustc_attr::{self as attr, is_builtin_attr, HasAttrs};
 use rustc_data_structures::map_in_place::MapInPlace;
@@ -1096,7 +1096,7 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
         });
 
         if token_attr.is_some() != attr.is_some() {
-            panic!("Mismatched AST and tokens: ast={:?} token_attr={:?}", attr, token_attr);
+            panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} target={:?}", attr, token_attr, has_attrs);
         }
 
         if let Some(attr) = &attr {
@@ -1411,7 +1411,7 @@ impl<'a, 'b> MutVisitor for InvocationCollector<'a, 'b> {
         }
 
         if let StmtKind::MacCall(mac) = stmt.kind {
-            let (mac, style, attrs) = mac.into_inner();
+            let MacCallStmt { call: mac, style, attrs, tokens: _ } = mac.into_inner();
             self.check_attributes(&attrs);
             let mut placeholder =
                 self.collect_bang(mac, stmt.span, AstFragmentKind::Stmts).make_stmts();

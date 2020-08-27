@@ -1507,11 +1507,11 @@ impl<'a> State<'a> {
                 self.s.word(";");
             }
             ast::StmtKind::MacCall(ref mac) => {
-                let (ref mac, style, ref attrs) = **mac;
+                let ast::MacCallStmt { call, style, attrs, tokens: _ } = &**mac;
                 self.space_if_not_bol();
                 self.print_outer_attributes(attrs);
-                self.print_mac(mac);
-                if style == ast::MacStmtStyle::Semicolon {
+                self.print_mac(call);
+                if *style == ast::MacStmtStyle::Semicolon {
                     self.s.word(";");
                 }
             }

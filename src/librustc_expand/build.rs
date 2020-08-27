@@ -175,6 +175,7 @@ impl<'a> ExtCtxt<'a> {
             id: ast::DUMMY_NODE_ID,
             span: sp,
             attrs: AttrVec::new(),
+            tokens: None,
         });
         ast::Stmt { id: ast::DUMMY_NODE_ID, kind: ast::StmtKind::Local(local), span: sp }
     }
@@ -188,6 +189,7 @@ impl<'a> ExtCtxt<'a> {
             id: ast::DUMMY_NODE_ID,
             span,
             attrs: AttrVec::new(),
+            tokens: None,
         });
         ast::Stmt { id: ast::DUMMY_NODE_ID, kind: ast::StmtKind::Local(local), span }
     }

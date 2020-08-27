@@ -10,7 +10,7 @@ use rustc_ast as ast;
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, TokenKind};
 use rustc_ast::util::classify;
-use rustc_ast::{AttrStyle, AttrVec, Attribute, MacCall, MacStmtStyle};
+use rustc_ast::{AttrStyle, AttrVec, Attribute, MacCall, MacStmtStyle, MacCallStmt};
 use rustc_ast::{Block, BlockCheckMode, Expr, ExprKind, Local, Stmt, StmtKind, DUMMY_NODE_ID};
 use rustc_errors::{Applicability, PResult};
 use rustc_span::source_map::{BytePos, Span};
@@ -70,9 +70,17 @@ impl<'a> Parser<'a> {
             };
             Ok(Some(stmt))
         })?;
-        if let Some(Stmt { kind: StmtKind::Item(item), .. }) = stmt.as_mut() {
-            item.tokens = tokens;
+        match stmt.as_mut() {
+            Some(Stmt { kind: StmtKind::Local(local), .. }) => local.tokens = tokens,
+            Some(Stmt { kind: StmtKind::Item(item), .. }) => item.tokens = tokens,
+            Some(Stmt { kind: StmtKind::Expr(expr) | StmtKind::Semi(expr), .. }) => {
+                expr.tokens = tokens
+            }
+            Some(Stmt { kind: StmtKind::Empty, .. }) => {},
+            Some(Stmt { kind: StmtKind::MacCall(mac), .. }) => mac.tokens = tokens,
+            None => {}
         }
+
         Ok(stmt)
     }
 
@@ -111,7 +119,7 @@ impl<'a> Parser<'a> {
 
         let kind = if delim == token::Brace || self.token == token::Semi || self.token == token::Eof
         {
-            StmtKind::MacCall(P((mac, style, attrs)))
+            StmtKind::MacCall(P(MacCallStmt { call: mac, style, attrs, tokens: None }))
         } else {
             // Since none of the above applied, this is an expression statement macro.
             let e = self.mk_expr(lo.to(hi), ExprKind::MacCall(mac), AttrVec::new());
@@ -223,7 +231,7 @@ impl<'a> Parser<'a> {
             }
         };
         let hi = if self.token == token::Semi { self.token.span } else { self.prev_token.span };
-        Ok(P(ast::Local { ty, pat, init, id: DUMMY_NODE_ID, span: lo.to(hi), attrs }))
+        Ok(P(ast::Local { ty, pat, init, id: DUMMY_NODE_ID, span: lo.to(hi), attrs, tokens: None }))
     }
 
     /// Parses the RHS of a local variable declaration (e.g., '= 14;').

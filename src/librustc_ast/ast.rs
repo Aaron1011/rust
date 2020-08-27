@@ -923,7 +923,9 @@ impl Stmt {
         self.kind = match self.kind {
             StmtKind::Expr(expr) => StmtKind::Semi(expr),
             StmtKind::MacCall(mac) => StmtKind::MacCall(
-                mac.map(|(mac, _style, attrs)| (mac, MacStmtStyle::Semicolon, attrs)),
+                mac.map(|MacCallStmt { call, style: _, attrs, tokens }| {
+                    MacCallStmt { call, style: MacStmtStyle::Semicolon, attrs, tokens }
+                })
             ),
             kind => kind,
         };
@@ -958,7 +960,15 @@ pub enum StmtKind {
     /// Just a trailing semi-colon.
     Empty,
     /// Macro.
-    MacCall(P<(MacCall, MacStmtStyle, AttrVec)>),
+    MacCall(P<MacCallStmt>),
+}
+
+#[derive(Clone, Encodable, Decodable, Debug)]
+pub struct MacCallStmt {
+    pub call: MacCall,
+    pub style: MacStmtStyle,
+    pub attrs: AttrVec,
+    pub tokens: Option<PreexpTokenStream>,
 }
 
 #[derive(Clone, Copy, PartialEq, Encodable, Decodable, Debug)]
@@ -984,6 +994,7 @@ pub struct Local {
     pub init: Option<P<Expr>>,
     pub span: Span,
     pub attrs: AttrVec,
+    pub tokens: Option<PreexpTokenStream>,
 }
 
 /// An arm of a 'match'.
