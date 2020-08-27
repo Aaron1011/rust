@@ -1314,6 +1314,7 @@ impl<'a> Parser<'a> {
 
         if let Some(target_frame) = target_frame {
             target_frame.modified_stream.extend(collected_tokens.clone().into_iter());
+            debug!("collect_tokens({}): extending stream with {:?}", std::panic::Location::caller(), collected_tokens);
         }
 
         if let Some(mut collecting) = prev_collecting {
@@ -1337,6 +1338,8 @@ impl<'a> Parser<'a> {
             }
             self.token_cursor.collecting = Some(collecting)
         }
+
+        debug!("collect_tokens({}): final tokens {:?}", std::panic::Location::caller(), collected_tokens);
 
         Ok((ret?.0, PreexpTokenStream::new(collected_tokens)))
     }

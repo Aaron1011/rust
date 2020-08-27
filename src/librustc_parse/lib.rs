@@ -261,6 +261,7 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
     // before we fall back to the stringification.
     let tokens = match *nt {
         Nonterminal::NtItem(ref item) => {
+            debug!("converting item tokenstream: {:?}", item.tokens);
             item.tokens.clone().map(|t| t.to_tokenstream())
             //prepend_attrs(sess, &item.attrs, item.tokens.as_ref().map(|stream| stream.clone().to_tokenstream()).as_ref(), span)
         }
@@ -322,6 +323,8 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
             "cached tokens found, but they're not \"probably equal\", \
                 going with stringified version"
         );
+        info!("cached stringified:   {:?}", pprust::tts_to_string(&tokens));
+        info!("reparsed stringified: {:?}", pprust::tts_to_string(&tokens_for_real));
         info!("cached tokens: {:?}", tokens);
         info!("reparsed tokens: {:?}", tokens_for_real);
     }
