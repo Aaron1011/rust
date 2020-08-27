@@ -493,7 +493,9 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                             tracing::debug!("remaining attributes: {:?}", data.attrs);
                             *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
                         } else {
-                            panic!("Unexpected tokens {:?}", tokens);
+                            if !tokens.0.is_empty() {
+                                panic!("Unexpected tokens {:?}", tokens);
+                            }
                         }
                     } else {
                         //panic!("Derive on non-item {:?}", item);
@@ -1093,7 +1095,9 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
                     tracing::debug!("remaining attributes: {:?}", data.attrs);
                     *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
                 } else {
-                    panic!("Unexpected tokens {:?}", tokens);
+                    if !tokens.0.is_empty() {
+                        panic!("Unexpected tokens {:?}", tokens);
+                    }
                 }
             });
         }

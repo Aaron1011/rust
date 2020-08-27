@@ -1255,6 +1255,10 @@ impl<'a> Parser<'a> {
         let prev_collecting =
             self.token_cursor.collecting.replace(Collecting { buf: tokens, depth: prev_depth, pos: prev_pos });
 
+        if prev_collecting.is_some() {
+            self.token_cursor.frame.modified_stream.pop();
+        }
+
         let duplicate_collect = prev_collecting.as_ref().map_or(false, |prev| prev.depth == prev_depth && prev.pos == prev_pos);
 
         let ret = f(self);
@@ -1274,10 +1278,11 @@ impl<'a> Parser<'a> {
 
         debug!("collect_tokens({}): got raw tokens {:?}", std::panic::Location::caller(), collected_tokens);
 
+
         // If we're not at EOF our current token wasn't actually consumed by
         // `f`, but it'll still be in our list that we pulled out. In that case
         // put it back.
-        if self.token != token::Eof {
+        let extra_token = if self.token != token::Eof {
             if let Some((PreexpTokenTree::Delimited(..), _)) = collected_tokens.last() {
                 None
             } else {
@@ -1296,7 +1301,7 @@ impl<'a> Parser<'a> {
                 let tree = (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint);
                 collected_tokens = vec![tree];
             } else {
-                if let Some((PreexpTokenTree::Token(token), _)) = collected_tokens.first() {
+                /*if let Some((PreexpTokenTree::Token(token), _)) = collected_tokens.first() {
                     if token.kind == token::Pound {
                         for tree in &collected_tokens {
                             if let (PreexpTokenTree::Token(inner), _) = tree {
@@ -1308,7 +1313,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                }
+                }*/
             }
         }
 
@@ -1325,9 +1330,11 @@ impl<'a> Parser<'a> {
         if let Some(target_frame) = target_frame {
             if keep_in_stream {
                 target_frame.modified_stream.extend(collected_tokens.clone().into_iter());
+                target_frame.modified_stream.extend(extra_token.clone());
                 debug!("collect_tokens({}): extending stream with {:?}", std::panic::Location::caller(), collected_tokens);
             }
         }
+
 
         if let Some(mut collecting) = prev_collecting {
             // If we were previously collecting at the same depth,
@@ -1344,6 +1351,7 @@ impl<'a> Parser<'a> {
                     collecting.buf = collected_tokens.clone();
                 } else {
                     collecting.buf.extend(collected_tokens.iter().cloned());
+                    collecting.buf.extend(extra_token);
                 }
                 //collecting.buf.extend(extra_token);
                 debug!("collect_tokens: updating previous buf to {:?}", collecting);
@@ -1351,9 +1359,13 @@ impl<'a> Parser<'a> {
             self.token_cursor.collecting = Some(collecting)
         }
 
-        debug!("collect_tokens({}): final tokens {:?}", std::panic::Location::caller(), collected_tokens);
+        let final_tokens = PreexpTokenStream::new(collected_tokens);
 
-        Ok((ret?.0, PreexpTokenStream::new(collected_tokens)))
+        debug!("collect_tokens({}): final tokens {:?}", std::panic::Location::caller(), final_tokens);
+        debug!("collect_tokens({}): final pretty {}",
+            std::panic::Location::caller(), rustc_ast_pretty::pprust::tts_to_string(&final_tokens.clone().to_tokenstream()));
+
+        Ok((ret?.0, final_tokens))
     }
 
     /// `::{` or `::*`
