@@ -335,7 +335,7 @@ pub fn mk_attr(style: AttrStyle, path: Path, args: MacArgs, span: Span) -> Attri
 }
 
 pub fn mk_attr_from_item(style: AttrStyle, item: AttrItem, span: Span) -> Attribute {
-    Attribute { kind: AttrKind::Normal(item), id: mk_attr_id(), style, span }
+    Attribute { kind: AttrKind::Normal(item), id: mk_attr_id(), style, span, tokens: None }
 }
 
 /// Returns an inner attribute with the given value and span.
@@ -354,7 +354,7 @@ pub fn mk_doc_comment(
     data: Symbol,
     span: Span,
 ) -> Attribute {
-    Attribute { kind: AttrKind::DocComment(comment_kind, data), id: mk_attr_id(), style, span }
+    Attribute { kind: AttrKind::DocComment(comment_kind, data), id: mk_attr_id(), style, span, tokens: None }
 }
 
 pub fn list_contains_name(items: &[NestedMetaItem], name: Symbol) -> bool {

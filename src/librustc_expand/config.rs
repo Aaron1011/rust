@@ -253,8 +253,7 @@ impl<'a> StripUnconfigured<'a> {
     pub fn process_cfg_attrs<T: HasAttrs>(&mut self, node: &mut T) {
         node.visit_attrs(|attrs| {
             attrs.flat_map_in_place(|attr| {
-               let inner = self.process_cfg_attr(attr, Default::default());
-               inner.into_iter().map(|(attr, _tokens)| attr)
+               self.process_cfg_attr(attr)
             })
         });
     }
@@ -264,11 +263,11 @@ impl<'a> StripUnconfigured<'a> {
         let trees: Vec<_> = stream.0.iter().flat_map(|tree| {
             match tree.0.clone() {
                 PreexpTokenTree::OuterAttributes(mut data) => {
-                    data.attrs.flat_map_in_place(|(attr, tokens)| {
-                        self.process_cfg_attr(attr, tokens)
+                    data.attrs.flat_map_in_place(|attr| {
+                        self.process_cfg_attr(attr)
                     });
 
-                    if self.in_cfg(data.attrs.iter().map(|(attr, _tokens)| attr)) {
+                    if self.in_cfg(data.attrs.iter()) {
                         data.tokens = self.configure_tokens(data.tokens);
                         vec![(PreexpTokenTree::OuterAttributes(data), tree.1)].into_iter()
                     } else {
@@ -291,9 +290,9 @@ impl<'a> StripUnconfigured<'a> {
     /// Gives a compiler warning when the `cfg_attr` contains no attributes and
     /// is in the original source file. Gives a compiler error if the syntax of
     /// the attribute is incorrect.
-    fn process_cfg_attr(&mut self, attr: Attribute, tokens: TokenStream) -> Vec<(Attribute, TokenStream)> {
+    fn process_cfg_attr(&mut self, attr: Attribute) -> Vec<Attribute> {
         if !attr.has_name(sym::cfg_attr) {
-            return vec![(attr, tokens)];
+            return vec![attr];
         }
 
         let (cfg_predicate, expanded_attrs) = match self.parse_cfg_attr(&attr) {
@@ -303,7 +302,7 @@ impl<'a> StripUnconfigured<'a> {
 
         // Lint on zero attributes in source.
         if expanded_attrs.is_empty() {
-            return vec![(attr, tokens)];
+            return vec![attr];
         }
 
         // At this point we know the attribute is considered used.
@@ -320,7 +319,7 @@ impl<'a> StripUnconfigured<'a> {
             .into_iter()
             .flat_map(|item| {
                 let attr = attr::mk_attr_from_item(attr.style, item.item, item.span);
-                self.process_cfg_attr(attr, item.tokens)
+                self.process_cfg_attr(attr)
             })
             .collect()
     }

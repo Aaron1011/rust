@@ -35,8 +35,8 @@ impl<'a> Parser<'a> {
         self.token == token::Pound || matches!(self.token.kind, token::DocComment(..))
     }
 
-    fn parse_outer_attributes_(&mut self) -> PResult<'a, Vec<(ast::Attribute, TokenStream)>> {
-        let mut attrs: Vec<(ast::Attribute, TokenStream)> = Vec::new();
+    fn parse_outer_attributes_(&mut self) -> PResult<'a, Vec<ast::Attribute>> {
+        let mut attrs: Vec<ast::Attribute> = Vec::new();
         let mut just_parsed_doc_comment = false;
 
         loop {
@@ -53,7 +53,7 @@ impl<'a> Parser<'a> {
                     let inner_parse_policy = InnerAttrPolicy::Forbidden {
                         reason: inner_error_reason,
                         saw_doc_comment: just_parsed_doc_comment,
-                        prev_attr_sp: attrs.last().map(|a| a.0.span),
+                        prev_attr_sp: attrs.last().map(|a| a.span),
                     };
                     let attr = this.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
                     just_parsed_doc_comment = false;
@@ -81,8 +81,9 @@ impl<'a> Parser<'a> {
                     Ok((None, Vec::new()))
                 }
             })?;
-            if let Some(attr) = attr {
-                attrs.push((attr, tokens.to_tokenstream()));
+            if let Some(mut attr) = attr {
+                attr.tokens = Some(tokens.to_tokenstream());
+                attrs.push(attr);
             } else {
                 break;
             }
@@ -117,7 +118,7 @@ impl<'a> Parser<'a> {
             //let start_depth = self.token_cursor.stack.len();
             //let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
 
-            let res = f(this, attrs.clone().into_iter().map(|a| a.0).collect());
+            let res = f(this, attrs.clone());
             Ok((res, attrs))
         })?;
         res.map(|inner| (inner, Some(tokens)))

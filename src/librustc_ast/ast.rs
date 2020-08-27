@@ -2413,6 +2413,7 @@ pub struct Attribute {
     /// or the construct this attribute is contained within (inner).
     pub style: AttrStyle,
     pub span: Span,
+    pub tokens: Option<TokenStream>,
 }
 
 #[derive(Clone, Encodable, Decodable, Debug)]

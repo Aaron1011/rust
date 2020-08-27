@@ -1196,7 +1196,7 @@ impl<'a> Parser<'a> {
     #[track_caller]
     pub fn collect_tokens<R>(
         &mut self,
-        f: impl FnOnce(&mut Self) -> PResult<'a, (R, Vec<(Attribute, TokenStream)>)>,
+        f: impl FnOnce(&mut Self) -> PResult<'a, (R, Vec<Attribute>)>,
     ) -> PResult<'a, (R, PreexpTokenStream)> {
 
         // We need special handling for the case where `collect_tokens` is called

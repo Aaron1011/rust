@@ -489,7 +489,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                         if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
                             let mut data = data.clone();
                             tracing::debug!("attributes before: {:?}", data.attrs);
-                            data.attrs.retain(|a| !a.0.has_name(sym::derive));
+                            data.attrs.retain(|a| !a.has_name(sym::derive));
                             tracing::debug!("remaining attributes: {:?}", data.attrs);
                             *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
                         } else {
@@ -1780,6 +1780,7 @@ impl<'a, 'b> MutVisitor for InvocationCollector<'a, 'b> {
                 span: at.span,
                 id: at.id,
                 style: at.style,
+                tokens: None
             };
         } else {
             noop_visit_attribute(at, self)

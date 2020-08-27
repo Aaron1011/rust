@@ -481,7 +481,7 @@ impl PreexpTokenStream {
                 builder.push(data.tokens.clone().to_tokenstream());
                 builder.build()*/
 
-                let flat: Vec<_> = data.attrs.iter().flat_map(|(_attr, tokens)| tokens.0.iter().cloned())
+                let flat: Vec<_> = data.attrs.iter().flat_map(|attr| attr.tokens.as_ref().expect("Missing tokens").0.iter().cloned())
                     .chain(data.tokens.clone().to_tokenstream().0.iter().cloned())
                     .collect();
                 flat.into_iter()
@@ -506,6 +506,6 @@ impl PreexpTokenStream {
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct AttributesData {
-    pub attrs: Vec<(crate::Attribute, TokenStream)>,
+    pub attrs: Vec<crate::Attribute>,
     pub tokens: PreexpTokenStream
 }
