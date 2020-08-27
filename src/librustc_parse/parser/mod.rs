@@ -1286,8 +1286,10 @@ impl<'a> Parser<'a> {
         // If we're not at EOF our current token wasn't actually consumed by
         // `f`, but it'll still be in our list that we pulled out. In that case
         // put it back.
-        let extra_token = if self.token != token::Eof {
+        let extra_token = if self.token != token::Eof && !matches!(self.token.kind, TokenKind::CloseDelim(_)) {
             if let Some((PreexpTokenTree::Delimited(..), _)) = collected_tokens.last() {
+                None
+            } else if false {
                 None
             } else {
                 collected_tokens.pop()
