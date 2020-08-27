@@ -1257,11 +1257,11 @@ impl<'a> Parser<'a> {
         let prev_pos = self.token_cursor.frame.tree_cursor.index();
 
         let prev_collecting =
-            self.token_cursor.collecting.replace(Collecting { buf: tokens, depth: prev_depth, pos: prev_pos });
+            self.token_cursor.collecting.replace(Collecting { buf: tokens.clone(), depth: prev_depth, pos: prev_pos });
 
-        if prev_collecting.is_some() {
+        /*if prev_collecting.is_some() && !tokens.is_empty() {
             self.token_cursor.frame.modified_stream.pop();
-        }
+        }*/
 
         let duplicate_collect = prev_collecting.as_ref().map_or(false, |prev| prev.depth == prev_depth && prev.pos == prev_pos);
 
@@ -1333,6 +1333,7 @@ impl<'a> Parser<'a> {
 
         if let Some(target_frame) = target_frame {
             if keep_in_stream {
+                target_frame.modified_stream.pop();
                 target_frame.modified_stream.extend(collected_tokens.clone().into_iter());
                 target_frame.modified_stream.extend(extra_token.clone());
                 debug!("collect_tokens({}): extending stream with {:?}", std::panic::Location::caller(), collected_tokens);
