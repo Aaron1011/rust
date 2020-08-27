@@ -994,13 +994,12 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 let frame = &self.token_cursor.frame;
-                let stream = frame.modified_stream.clone();
+                let stream = frame.tree_cursor.stream.clone();
                 let span = frame.span;
                 let delim = frame.delim;
                 // Consume close delimiter
                 self.bump();
-
-                TokenTree::Delimited(span, delim, PreexpTokenStream::new(stream).to_tokenstream())
+                TokenTree::Delimited(span, delim, stream)
             }
             token::CloseDelim(_) | token::Eof => unreachable!(),
             _ => {

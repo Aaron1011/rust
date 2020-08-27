@@ -87,8 +87,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_item_(&mut self, req_name: ReqName) -> PResult<'a, Option<Item>> {
-        self.parse_outer_attributes(|this, attrs| {
+        let res = self.parse_outer_attributes_with_tokens(|this, attrs| {
             this.parse_item_common(attrs, true, false, req_name)
+        });
+        res.map(|(mut item, tokens)| {
+            if let Some(item) = item.as_mut() {
+                item.tokens = tokens;
+            }
+            item
         })
     }
 

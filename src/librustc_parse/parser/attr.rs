@@ -91,7 +91,9 @@ impl<'a> Parser<'a> {
         f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
     ) -> PResult<'a, (R, Option<PreexpTokenStream>)> {
 
-        if !self.has_any_attributes() {
+        let force_collect = std::mem::replace(&mut self.force_capture_tokens, false);
+
+        if !(self.has_any_attributes() || force_collect) {
             let res = f(self, Vec::new())?;
             return Ok((res, None))
         }

@@ -331,7 +331,10 @@ impl<'a> StripUnconfigured<'a> {
                     }
                 }
             }
-            _ => self.error_malformed_cfg_attr_missing(attr.span),
+            ref args => {
+                eprintln!("Malformed args: {:?}", args);
+                self.error_malformed_cfg_attr_missing(attr.span)
+            }
         }
         None
     }
