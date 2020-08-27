@@ -275,6 +275,8 @@ pub fn nt_to_tokenstream(nt: &Nonterminal, sess: &ParseSess, span: Span) -> Toke
         Nonterminal::NtExpr(ref expr) => {
             if expr.tokens.is_none() {
                 debug!("missing tokens for expr {:?}", expr);
+            } else {
+                debug!("converting expr tokenstream: {:?}", expr.tokens);
             }
             expr.tokens.clone().map(|t| t.to_tokenstream())
             //prepend_attrs(sess, &expr.attrs, expr.tokens.as_ref(), span)

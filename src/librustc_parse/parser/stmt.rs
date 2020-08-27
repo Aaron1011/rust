@@ -74,7 +74,10 @@ impl<'a> Parser<'a> {
             Some(Stmt { kind: StmtKind::Local(local), .. }) => local.tokens = tokens,
             Some(Stmt { kind: StmtKind::Item(item), .. }) => item.tokens = tokens,
             Some(Stmt { kind: StmtKind::Expr(expr) | StmtKind::Semi(expr), .. }) => {
-                expr.tokens = tokens
+                // FIXME: Attribute parsing should do this for us.
+                if expr.tokens.is_none() {
+                    expr.tokens = tokens
+                }
             }
             Some(Stmt { kind: StmtKind::Empty, .. }) => {},
             Some(Stmt { kind: StmtKind::MacCall(mac), .. }) => mac.tokens = tokens,

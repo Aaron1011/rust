@@ -1262,7 +1262,7 @@ impl<'a> Parser<'a> {
             return Ok((ret, PreexpTokenStream::default()));
         };
 
-        debug!("collect_tokens: got raw tokens {:?}", collected_tokens);
+        debug!("collect_tokens({}): got raw tokens {:?}", std::panic::Location::caller(), collected_tokens);
 
         // If we're not at EOF our current token wasn't actually consumed by
         // `f`, but it'll still be in our list that we pulled out. In that case
@@ -1301,7 +1301,20 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        self.token_cursor.frame.modified_stream.extend(collected_tokens.clone().into_iter());
+
+        let target_frame = if self.token_cursor.stack.len() == prev_depth {
+            Some(&mut self.token_cursor.frame)
+        } else if self.token_cursor.stack.len() == prev_depth + 1 {
+            Some(self.token_cursor.stack.last_mut().unwrap())
+        } else if self.token_cursor.stack.len() == prev_depth - 1 {
+            None
+        } else {
+            panic!("Bad depth at token {:?}", self.token);
+        };
+
+        if let Some(target_frame) = target_frame {
+            target_frame.modified_stream.extend(collected_tokens.clone().into_iter());
+        }
 
         if let Some(mut collecting) = prev_collecting {
             // If we were previously collecting at the same depth,
@@ -1313,7 +1326,7 @@ impl<'a> Parser<'a> {
             // this entire frame in the form of a `TokenTree::Delimited`,
             // so there is nothing else for us to do.
             if collecting.depth == prev_depth {
-                if duplicate_collect {
+                if duplicate_collect && false {
                     debug!("duplicate collect!");
                     collecting.buf = collected_tokens.clone();
                 } else {
