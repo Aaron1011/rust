@@ -10,7 +10,7 @@ use crate::proc_macro::collect_derives;
 use rustc_ast::mut_visit::*;
 use rustc_ast::ptr::P;
 use rustc_ast::token;
-use rustc_ast::tokenstream::TokenStream;
+use rustc_ast::tokenstream::{TokenStream, PreexpTokenStream, PreexpTokenTree};
 use rustc_ast::visit::{self, AssocCtxt, Visitor};
 use rustc_ast::{self as ast, AttrItem, Block, LitKind, NodeId, PatKind, Path};
 use rustc_ast::{ItemKind, MacArgs, MacStmtStyle, StmtKind};
@@ -480,6 +480,18 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
 
                     let mut item = self.fully_configure(item);
                     item.visit_attrs(|attrs| attrs.retain(|a| !a.has_name(sym::derive)));
+                    if let Annotatable::Item(item) = &mut item {
+                        let tokens = item.tokens.as_mut().expect("Missing tokens!");
+                        if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
+                            let mut data = data.clone();
+                            data.attrs.retain(|a| !a.0.has_name(sym::derive));
+                            *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+                        } else {
+                            panic!("Unexpected tokens {:?}", tokens);
+                        }
+                    } else {
+                        panic!("Derive on non-item {:?}", item);
+                    }
 
                     let mut derive_placeholders = Vec::with_capacity(derives.len());
                     invocations.reserve(derives.len());
