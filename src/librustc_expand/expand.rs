@@ -1098,9 +1098,9 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
             });
         }
 
-        if token_attr.is_some() != attr.is_some() {
+        /*if token_attr.is_some() != attr.is_some() {
             panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} target={:?}", attr, token_attr, attr_target);
-        }
+        }*/
 
         if let Some(attr) = &attr {
             if !self.cx.ecfg.custom_inner_attributes()
