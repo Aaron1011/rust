@@ -488,7 +488,9 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                         };
                         if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
                             let mut data = data.clone();
+                            tracing::debug!("attributes before: {:?}", data.attrs);
                             data.attrs.retain(|a| !a.0.has_name(sym::derive));
+                            tracing::debug!("remaining attributes: {:?}", data.attrs);
                             *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
                         } else {
                             panic!("Unexpected tokens {:?}", tokens);
@@ -496,6 +498,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                     } else {
                         panic!("Derive on non-item {:?}", item);
                     }
+                    tracing::debug!("item after: {:?}", item);
 
                     let mut derive_placeholders = Vec::with_capacity(derives.len());
                     invocations.reserve(derives.len());

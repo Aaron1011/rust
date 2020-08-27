@@ -111,11 +111,11 @@ impl<'a> Parser<'a> {
             return Ok((res, None))
         }
 
+        let attrs = self.parse_outer_attributes_()?;
+
         let (res, tokens) = self.collect_tokens(|this| {
             //let start_depth = self.token_cursor.stack.len();
             //let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
-
-            let attrs = this.parse_outer_attributes_()?;
 
             let res = f(this, attrs.clone().into_iter().map(|a| a.0).collect());
             Ok((res, attrs))
