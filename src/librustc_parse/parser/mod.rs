@@ -172,16 +172,15 @@ impl TokenCursor {
                 self.frame.open_delim = true;
                 TokenTree::open_tt(self.frame.span, self.frame.delim).into()
             } else if let Some(tree) = self.frame.tree_cursor.next_with_joint() {
-                if let Some(collecting) = &self.collecting {
-                    if collecting.depth != self.stack.len() {
-                        if let TokenTree::Token(token) = tree.0.clone() {
-                            self.frame.modified_stream.push((PreexpTokenTree::Token(token), tree.1));
+                if let Some(collecting) = &mut self.collecting {
+                    if let TokenTree::Token(token) = tree.0.clone() {
+                        let new_tree = (PreexpTokenTree::Token(token.clone()), tree.1);
+                        if collecting.depth < self.stack.len() {
+                            debug!("collected token {:?}", token);
+                            self.frame.modified_stream.push(new_tree);
+                        } else if collecting.depth == self.stack.len() {
+                            collecting.buf.push(new_tree);
                         }
-                        /*let new_tree = match tree.0.clone() {
-                            TokenTree::Token(token) => PreexpTokenTree::Token(token),
-                            TokenTree::Delimited(sp, delim, stream) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(stream))
-                        };
-                        self.frame.modified_stream.push((new_tree, tree.1));*/
                     }
                 }
                 tree
@@ -218,7 +217,7 @@ impl TokenCursor {
 
             match tree.0.clone() {
                 TokenTree::Token(token) => {
-                    if let Some(collecting) = &mut self.collecting {
+                    /*if let Some(collecting) = &mut self.collecting {
                         if collecting.depth == self.stack.len() {
                             debug!(
                                 "TokenCursor::next():  collected {:?} at depth {:?}",
@@ -227,7 +226,7 @@ impl TokenCursor {
                             );
                             collecting.buf.push((PreexpTokenTree::Token(token.clone()), tree.1))
                         }
-                    }
+                    }*/
                     return token;
                 }
                 TokenTree::Delimited(sp, delim, tts) => {
