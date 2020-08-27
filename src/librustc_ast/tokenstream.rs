@@ -464,13 +464,15 @@ impl PreexpTokenStream {
                 for (_attr, tokens) in &data.attrs {
                     builder.push(tokens.clone());
                 }
-                builder.push(data.target.clone().to_tokenstream());*/
-                /*let flat: Vec<_> = data.attrs.iter().flat_map(|(_attr, tokens)| tokens.0.iter().cloned())
-                    .chain(data.target.clone().to_tokenstream().0.iter().cloned())
+                builder.push(data.tokens.clone().to_tokenstream());
+                builder.build()*/
+
+                let flat: Vec<_> = data.attrs.iter().flat_map(|(_attr, tokens)| tokens.0.iter().cloned())
+                    .chain(data.tokens.clone().to_tokenstream().0.iter().cloned())
                     .collect();
-                flat.into_iter()*/
-                let tokens: Vec<_> = data.tokens.clone().to_tokenstream().0.iter().cloned().collect();
-                tokens.into_iter()
+                flat.into_iter()
+                //let tokens: Vec<_> = data.tokens.clone().to_tokenstream().0.iter().cloned().collect();
+                //tokens.into_iter()
             }
         }).collect();
         TokenStream::new(trees)
@@ -490,6 +492,6 @@ impl PreexpTokenStream {
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct AttributesData {
-    pub attrs: Vec<crate::Attribute>,
+    pub attrs: Vec<(crate::Attribute, TokenStream)>,
     pub tokens: PreexpTokenStream
 }

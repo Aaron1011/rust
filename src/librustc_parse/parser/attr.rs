@@ -2,7 +2,7 @@ use super::{Parser, PathStyle};
 use rustc_ast as ast;
 use rustc_ast::attr;
 use rustc_ast::token::{self, Nonterminal};
-use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint};
+use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint, TokenStream};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{error_code, PResult};
 use rustc_span::Span;
@@ -18,6 +18,12 @@ pub(super) enum InnerAttrPolicy<'a> {
 const DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG: &str = "an inner attribute is not \
                                                      permitted in this context";
 
+pub struct CfgAttrItem {
+    pub item: ast::AttrItem,
+    pub span: Span,
+    pub tokens: TokenStream
+}
+
 pub(super) const DEFAULT_INNER_ATTR_FORBIDDEN: InnerAttrPolicy<'_> = InnerAttrPolicy::Forbidden {
     reason: DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG,
     saw_doc_comment: false,
@@ -29,47 +35,54 @@ impl<'a> Parser<'a> {
         self.token == token::Pound || matches!(self.token.kind, token::DocComment(..))
     }
 
-    fn parse_outer_attributes_(&mut self) -> PResult<'a, Vec<ast::Attribute>> {
-        let mut attrs: Vec<ast::Attribute> = Vec::new();
+    fn parse_outer_attributes_(&mut self) -> PResult<'a, Vec<(ast::Attribute, TokenStream)>> {
+        let mut attrs: Vec<(ast::Attribute, TokenStream)> = Vec::new();
         let mut just_parsed_doc_comment = false;
 
         loop {
-            debug!("parse_outer_attributes: self.token={:?}", self.token);
-            if self.check(&token::Pound) {
-                let inner_error_reason = if just_parsed_doc_comment {
-                    "an inner attribute is not permitted following an outer doc comment"
-                } else if !attrs.is_empty() {
-                    "an inner attribute is not permitted following an outer attribute"
+            let (attr, tokens) = self.collect_tokens(|this| {
+                debug!("parse_outer_attributes: self.token={:?}", this.token);
+                if this.check(&token::Pound) {
+                    let inner_error_reason = if just_parsed_doc_comment {
+                        "an inner attribute is not permitted following an outer doc comment"
+                    } else if !attrs.is_empty() {
+                        "an inner attribute is not permitted following an outer attribute"
+                    } else {
+                        DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
+                    };
+                    let inner_parse_policy = InnerAttrPolicy::Forbidden {
+                        reason: inner_error_reason,
+                        saw_doc_comment: just_parsed_doc_comment,
+                        prev_attr_sp: attrs.last().map(|a| a.0.span),
+                    };
+                    let attr = this.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
+                    just_parsed_doc_comment = false;
+                    Ok((Some(attr), Vec::new())) // Attributes don't have their own attributes
+                } else if let token::DocComment(comment_kind, attr_style, data) = this.token.kind {
+                    let attr = attr::mk_doc_comment(comment_kind, attr_style, data, this.token.span);
+                    if attr.style != ast::AttrStyle::Outer {
+                        this.sess
+                            .span_diagnostic
+                            .struct_span_err_with_code(
+                                this.token.span,
+                                "expected outer doc comment",
+                                error_code!(E0753),
+                            )
+                            .note(
+                                "inner doc comments like this (starting with \
+                                 `//!` or `/*!`) can only appear before items",
+                            )
+                            .emit();
+                    }
+                    this.bump();
+                    just_parsed_doc_comment = true;
+                    Ok((Some(attr), Vec::new()))
                 } else {
-                    DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG
-                };
-                let inner_parse_policy = InnerAttrPolicy::Forbidden {
-                    reason: inner_error_reason,
-                    saw_doc_comment: just_parsed_doc_comment,
-                    prev_attr_sp: attrs.last().map(|a| a.span),
-                };
-                let attr = self.parse_attribute_with_inner_parse_policy(inner_parse_policy)?;
-                attrs.push(attr);
-                just_parsed_doc_comment = false;
-            } else if let token::DocComment(comment_kind, attr_style, data) = self.token.kind {
-                let attr = attr::mk_doc_comment(comment_kind, attr_style, data, self.token.span);
-                if attr.style != ast::AttrStyle::Outer {
-                    self.sess
-                        .span_diagnostic
-                        .struct_span_err_with_code(
-                            self.token.span,
-                            "expected outer doc comment",
-                            error_code!(E0753),
-                        )
-                        .note(
-                            "inner doc comments like this (starting with \
-                             `//!` or `/*!`) can only appear before items",
-                        )
-                        .emit();
+                    Ok((None, Vec::new()))
                 }
-                attrs.push(attr);
-                self.bump();
-                just_parsed_doc_comment = true;
+            })?;
+            if let Some(attr) = attr {
+                attrs.push((attr, tokens.to_tokenstream()));
             } else {
                 break;
             }
@@ -104,7 +117,7 @@ impl<'a> Parser<'a> {
 
             let attrs = this.parse_outer_attributes_()?;
 
-            let res = f(this, attrs.clone());
+            let res = f(this, attrs.clone().into_iter().map(|a| a.0).collect());
             Ok((res, attrs))
         })?;
         res.map(|inner| (inner, Some(tokens)))
@@ -277,7 +290,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses `cfg_attr(pred, attr_item_list)` where `attr_item_list` is comma-delimited.
-    pub fn parse_cfg_attr(&mut self) -> PResult<'a, (ast::MetaItem, Vec<(ast::AttrItem, Span)>)> {
+    pub fn parse_cfg_attr(&mut self) -> PResult<'a, (ast::MetaItem, Vec<CfgAttrItem>)> {
         let cfg_predicate = self.parse_meta_item()?;
         self.expect(&token::Comma)?;
 
@@ -285,8 +298,15 @@ impl<'a> Parser<'a> {
         let mut expanded_attrs = Vec::with_capacity(1);
         while self.token.kind != token::Eof {
             let lo = self.token.span;
-            let item = self.parse_attr_item()?;
-            expanded_attrs.push((item, lo.to(self.prev_token.span)));
+            let (item, tokens) = self.collect_tokens(|this| {
+                this.parse_attr_item().map(|item| (item, Vec::new()))
+            })?;
+            expanded_attrs.push(CfgAttrItem {
+                item,
+                span: lo.to(self.prev_token.span),
+                tokens: tokens.to_tokenstream()
+            });
+
             if !self.eat(&token::Comma) {
                 break;
             }
