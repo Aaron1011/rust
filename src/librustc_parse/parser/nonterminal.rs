@@ -131,7 +131,7 @@ impl<'a> Parser<'a> {
                 // If we captured tokens during parsing (due to outer attributes),
                 // use those.
                 if expr.tokens.is_none() {
-                    expr.tokens = Some(tokens.to_tokenstream());
+                    expr.tokens = Some(tokens);
                 }
                 token::NtExpr(expr)
             }

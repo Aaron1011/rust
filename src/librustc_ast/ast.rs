@@ -1052,7 +1052,7 @@ pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
     pub attrs: AttrVec,
-    pub tokens: Option<TokenStream>,
+    pub tokens: Option<PreexpTokenStream>,
 }
 
 // `Expr` is used a lot. Make sure it doesn't unintentionally get bigger.

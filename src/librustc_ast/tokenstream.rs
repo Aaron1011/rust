@@ -446,7 +446,7 @@ impl std::fmt::Debug for DisplayStr {
 }
 
 #[derive(Clone, Debug, Default, Encodable, Decodable)]
-pub struct PreexpTokenStream(pub Lrc<Vec<(PreexpTokenTree, IsJoint)>>, DisplayStr);
+pub struct PreexpTokenStream(pub Lrc<Vec<(PreexpTokenTree, IsJoint)>>);
 
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub enum PreexpTokenTree {
@@ -462,7 +462,7 @@ impl PreexpTokenStream {
                 panic!("Constructed weird attributes: {:?}", tokens);
             }
         }*/
-        PreexpTokenStream(Lrc::new(tokens), DisplayStr(String::new()))
+        PreexpTokenStream(Lrc::new(tokens))
     }
 
     pub fn to_tokenstream(self) -> TokenStream {

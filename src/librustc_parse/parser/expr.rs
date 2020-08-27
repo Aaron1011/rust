@@ -480,7 +480,7 @@ impl<'a> Parser<'a> {
             }?;
             Ok(this.mk_expr(lo.to(hi), ex, attrs))
         })?;
-        expr.tokens = tokens.map(|t| t.to_tokenstream());
+        expr.tokens = tokens;
         Ok(expr)
     }
 

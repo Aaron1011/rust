@@ -1056,10 +1056,12 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
 
     fn find_attr_invoc(
         &self,
-        attrs: &mut Vec<ast::Attribute>,
+        has_attrs: &mut (impl HasAttrs + std::fmt::Debug),
         after_derive: &mut bool,
     ) -> Option<ast::Attribute> {
-        let attr = attrs
+        let mut attr = None;
+        has_attrs.visit_attrs(|mut attrs| {
+            attrs
             .iter()
             .position(|a| {
                 if a.has_name(sym::derive) {
@@ -1067,7 +1069,36 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
                 }
                 !self.cx.sess.is_attr_known(a) && !is_builtin_attr(a)
             })
-            .map(|i| attrs.remove(i));
+            .map(|i| attr = Some(attrs.remove(i)));
+        });
+        let mut token_attr = None;
+        has_attrs.visit_tokens(|tokens| {
+            if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
+                let mut data = data.clone();
+                tracing::debug!("attributes before: {:?}", data.attrs);
+                token_attr = data.attrs
+                    .iter()
+                    .position(|a| {
+                        !self.cx.sess.is_attr_known(a) && !is_builtin_attr(a)
+                    })
+                    .map(|i| data.attrs.remove(i));
+
+
+                if token_attr.is_some() != attr.is_some() {
+                    panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} tokens={:?}", attr, token_attr, tokens);
+                }
+
+                tracing::debug!("remaining attributes: {:?}", data.attrs);
+                *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+            } else {
+                panic!("Unexpected tokens {:?}", tokens);
+            }
+        });
+
+        if token_attr.is_some() != attr.is_some() {
+            panic!("Mismatched AST and tokens: ast={:?} token_attr={:?}", attr, token_attr);
+        }
+
         if let Some(attr) = &attr {
             if !self.cx.ecfg.custom_inner_attributes()
                 && attr.style == ast::AttrStyle::Inner
@@ -1088,12 +1119,12 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
     /// If `item` is an attr invocation, remove and return the macro attribute and derive traits.
     fn classify_item(
         &mut self,
-        item: &mut impl HasAttrs,
+        item: &mut (impl HasAttrs + std::fmt::Debug),
     ) -> (Option<ast::Attribute>, Vec<Path>, /* after_derive */ bool) {
         let (mut attr, mut traits, mut after_derive) = (None, Vec::new(), false);
 
+        attr = self.find_attr_invoc(item, &mut after_derive);
         item.visit_attrs(|mut attrs| {
-            attr = self.find_attr_invoc(&mut attrs, &mut after_derive);
             traits = collect_derives(&mut self.cx, &mut attrs);
         });
 
@@ -1105,13 +1136,11 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
     /// is a breaking change)
     fn classify_nonitem(
         &mut self,
-        nonitem: &mut impl HasAttrs,
+        nonitem: &mut (impl HasAttrs + std::fmt::Debug),
     ) -> (Option<ast::Attribute>, /* after_derive */ bool) {
         let (mut attr, mut after_derive) = (None, false);
 
-        nonitem.visit_attrs(|mut attrs| {
-            attr = self.find_attr_invoc(&mut attrs, &mut after_derive);
-        });
+        attr = self.find_attr_invoc(nonitem, &mut after_derive);
 
         (attr, after_derive)
     }
