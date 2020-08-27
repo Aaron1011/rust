@@ -241,7 +241,10 @@ const CFG_ATTR_NOTE_REF: &str = "for more information, visit \
 impl<'a> StripUnconfigured<'a> {
     pub fn configure<T: HasAttrs>(&mut self, mut node: T) -> Option<T> {
         self.process_cfg_attrs(&mut node);
-        self.in_cfg(node.attrs().iter()).then_some(node)
+        self.in_cfg(node.attrs().iter()).then(|| {
+            node.visit_tokens(|tokens| *tokens = self.configure_tokens(tokens));
+            node
+        })
     }
 
     /// Parse and expand all `cfg_attr` attributes into a list of attributes
@@ -258,7 +261,7 @@ impl<'a> StripUnconfigured<'a> {
         });
     }
     
-    fn configure_tokens(&mut self, stream: PreexpTokenStream) -> PreexpTokenStream {
+    fn configure_tokens(&mut self, stream: &PreexpTokenStream) -> PreexpTokenStream {
         tracing::debug!("configuring tokens: {:?}", stream);
         let trees: Vec<_> = stream.0.iter().flat_map(|tree| {
             match tree.0.clone() {
@@ -268,14 +271,14 @@ impl<'a> StripUnconfigured<'a> {
                     });
 
                     if self.in_cfg(data.attrs.iter()) {
-                        data.tokens = self.configure_tokens(data.tokens);
+                        data.tokens = self.configure_tokens(&data.tokens);
                         vec![(PreexpTokenTree::OuterAttributes(data), tree.1)].into_iter()
                     } else {
                         vec![].into_iter()
                     }
                 }
                 PreexpTokenTree::Delimited(sp, delim, inner) => {
-                    vec![(PreexpTokenTree::Delimited(sp, delim, self.configure_tokens(inner)), tree.1)].into_iter()
+                    vec![(PreexpTokenTree::Delimited(sp, delim, self.configure_tokens(&inner)), tree.1)].into_iter()
                 }
                 PreexpTokenTree::Token(_) => vec![tree.clone()].into_iter(),
             }
@@ -533,7 +536,7 @@ impl<'a> MutVisitor for StripUnconfigured<'a> {
     }
 
     fn flat_map_item(&mut self, mut item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        item.tokens = item.tokens.clone().map(|tokens| self.configure_tokens(tokens));
+        //item.tokens = item.tokens.clone().map(|tokens| self.configure_tokens(tokens));
         noop_flat_map_item(configure!(self, item), self)
     }
 
