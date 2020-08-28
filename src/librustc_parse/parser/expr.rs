@@ -1081,21 +1081,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /*fn maybe_collect_tokens(
-        &mut self,
-        has_outer_attrs: bool,
-        f: impl FnOnce(&mut Self) -> PResult<'a, P<Expr>>,
-    ) -> PResult<'a, P<Expr>> {
-        if has_outer_attrs {
-            let (mut expr, tokens) = self.collect_tokens(f)?;
-            debug!("maybe_collect_tokens: Collected tokens for {:?} (tokens {:?}", expr, tokens);
-            expr.tokens = Some(tokens.to_tokenstream());
-            Ok(expr)
-        } else {
-            f(self)
-        }
-    }*/
-
     fn parse_lit_expr(&mut self, attrs: AttrVec) -> PResult<'a, P<Expr>> {
         let lo = self.token.span;
         match self.parse_opt_lit() {

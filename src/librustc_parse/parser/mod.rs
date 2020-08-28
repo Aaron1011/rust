@@ -223,16 +223,6 @@ impl TokenCursor {
 
             match tree.0.clone() {
                 TokenTree::Token(token) => {
-                    /*if let Some(collecting) = &mut self.collecting {
-                        if collecting.depth == self.stack.len() {
-                            debug!(
-                                "TokenCursor::next():  collected {:?} at depth {:?}",
-                                tree,
-                                self.stack.len()
-                            );
-                            collecting.buf.push((PreexpTokenTree::Token(token.clone()), tree.1))
-                        }
-                    }*/
                     return token;
                 }
                 TokenTree::Delimited(sp, delim, tts) => {
@@ -1275,10 +1265,6 @@ impl<'a> Parser<'a> {
             pos: prev_pos,
         });
 
-        /*if prev_collecting.is_some() && !tokens.is_empty() {
-            self.token_cursor.frame.modified_stream.pop();
-        }*/
-
         let duplicate_collect = prev_collecting
             .as_ref()
             .map_or(false, |prev| prev.depth == prev_depth && prev.pos == prev_pos);
@@ -1329,20 +1315,6 @@ impl<'a> Parser<'a> {
                 };
                 let tree = (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint);
                 collected_tokens = vec![tree];
-            } else {
-                /*if let Some((PreexpTokenTree::Token(token), _)) = collected_tokens.first() {
-                    if token.kind == token::Pound {
-                        for tree in &collected_tokens {
-                            if let (PreexpTokenTree::Token(inner), _) = tree {
-                                if let TokenKind::Ident(sym, _) = inner.kind {
-                                    if sym.as_str() == "struct" {
-                                        panic!("Constructed weird attributes: {:?}", collected_tokens);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }*/
             }
         }
 

@@ -448,11 +448,6 @@ pub enum PreexpTokenTree {
 
 impl PreexpTokenStream {
     pub fn new(tokens: Vec<(PreexpTokenTree, IsJoint)>) -> PreexpTokenStream {
-        /*if let Some((PreexpTokenTree::Token(token), _)) = tokens.first() {
-            if token.kind == token::Pound {
-                panic!("Constructed weird attributes: {:?}", tokens);
-            }
-        }*/
         PreexpTokenStream(Lrc::new(tokens))
     }
 
@@ -470,15 +465,6 @@ impl PreexpTokenStream {
                 )]
                 .into_iter(),
                 PreexpTokenTree::OuterAttributes(data) => {
-                    //eprintln!("Converting attributes: {:?}", data);
-                    //eprintln!("{}", std::backtrace::Backtrace::capture());
-                    /*let mut builder = TokenStreamBuilder::new();
-                    for (_attr, tokens) in &data.attrs {
-                        builder.push(tokens.clone());
-                    }
-                    builder.push(data.tokens.clone().to_tokenstream());
-                    builder.build()*/
-
                     let flat: Vec<_> = data
                         .attrs
                         .iter()
@@ -488,8 +474,6 @@ impl PreexpTokenStream {
                         .chain(data.tokens.clone().to_tokenstream().0.iter().cloned())
                         .collect();
                     flat.into_iter()
-                    //let tokens: Vec<_> = data.tokens.clone().to_tokenstream().0.iter().cloned().collect();
-                    //tokens.into_iter()
                 }
             })
             .collect();
