@@ -6,7 +6,7 @@ use crate::maybe_whole;
 
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, TokenKind};
-use rustc_ast::tokenstream::{DelimSpan, TokenStream, TokenTree};
+use rustc_ast::tokenstream::{DelimSpan, TokenStream, TokenTree, PreexpTokenTree, PreexpTokenStream, AttributesData, IsJoint};
 use rustc_ast::{self as ast, AttrStyle, AttrVec, Attribute, DUMMY_NODE_ID};
 use rustc_ast::{AssocItem, AssocItemKind, ForeignItemKind, Item, ItemKind, Mod};
 use rustc_ast::{Async, Const, Defaultness, IsAuto, Mutability, Unsafe, UseTree, UseTreeKind};
@@ -92,7 +92,9 @@ impl<'a> Parser<'a> {
         });
         res.map(|(mut item, tokens)| {
             if let Some(item) = item.as_mut() {
-                item.tokens = tokens;
+                if item.tokens.is_none() {
+                    item.tokens = tokens;
+                }
             }
             item
         })
@@ -106,10 +108,33 @@ impl<'a> Parser<'a> {
         req_name: ReqName,
     ) -> PResult<'a, Option<Item>> {
         maybe_whole!(self, NtItem, |item| {
-            let mut item = item;
+            let mut item = item.into_inner();
+
+            if !attrs.is_empty() {
+                if let Some(tokens) = item.tokens.as_mut() {
+                    if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
+                        let mut data = data.clone();
+                        let mut attrs = attrs.clone();
+                        mem::swap(&mut data.attrs, &mut attrs);
+                        data.attrs.extend(attrs);
+                        debug!("new data: {:?}", data);
+                        *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+                    } else {
+                        assert!(item.attrs.is_empty(), "Non-empty attributes: {:?}", item.attrs);
+                        let data = AttributesData {
+                            attrs: attrs.clone(),
+                            tokens: tokens.clone()
+                        };
+                        *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint)])
+                    }
+                } else {
+                    panic!("Missing tokens for {:?}", item);
+                }
+            }
+
             mem::swap(&mut item.attrs, &mut attrs);
             item.attrs.extend(attrs);
-            Some(item.into_inner())
+            Some(item)
         });
 
         let item = self.parse_item_common_(attrs, mac_allowed, attrs_allowed, req_name);

@@ -1089,7 +1089,7 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
 
 
                     if token_attr.is_some() != attr.is_some() {
-                        panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} tokens={:?}", attr, token_attr, tokens);
+                        panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} tokens={:?}\ndata={:?}", attr, token_attr, tokens, data);
                     }
 
                     tracing::debug!("remaining attributes: {:?}", data.attrs);
