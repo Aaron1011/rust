@@ -590,7 +590,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
 
         let invocations = {
             let mut collector = InvocationCollector {
-                cfg: StripUnconfigured { sess: &self.cx.sess, features: self.cx.ecfg.features },
+                cfg: StripUnconfigured { sess: &self.cx.sess, features: self.cx.ecfg.features, cfg_attr_errors: Default::default() },
                 cx: self.cx,
                 invocations: Vec::new(),
                 monotonic: self.monotonic,
@@ -610,7 +610,7 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
     }
 
     fn fully_configure(&mut self, item: Annotatable) -> Annotatable {
-        let mut cfg = StripUnconfigured { sess: &self.cx.sess, features: self.cx.ecfg.features };
+        let mut cfg = StripUnconfigured { sess: &self.cx.sess, features: self.cx.ecfg.features, cfg_attr_errors: Default::default() };
         // Since the item itself has already been configured by the InvocationCollector,
         // we know that fold result vector will contain exactly one element
         match item {
@@ -1077,8 +1077,30 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
             })
             .map(|i| attr = Some(attrs.remove(i)));
         });
+
+        let mut has_inner = false;
+        if let Some(attr) = &attr {
+            has_inner = attr.style == ast::AttrStyle::Inner;
+            if !self.cx.ecfg.custom_inner_attributes()
+                && attr.style == ast::AttrStyle::Inner
+                && !attr.has_name(sym::test)
+            {
+                feature_err(
+                    &self.cx.sess.parse_sess,
+                    sym::custom_inner_attributes,
+                    attr.span,
+                    "non-builtin inner attributes are unstable",
+                )
+                .emit();
+            }
+        }
+
         let mut token_attr = None;
-        if has_attrs {
+        // FIXME: Support inner attributes.
+        // For now, we don't attempt to modify the TokenStream, which will
+        // cause us to use the pretty-print/retokenized stream later
+        // on due to the mismatch.
+        if has_attrs && !has_inner {
             attr_target.visit_tokens(|tokens| {
                 if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
                     let mut data = data.clone();
@@ -1109,20 +1131,6 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
             panic!("Mismatched AST and tokens: ast={:?} token_attr={:?} target={:?}", attr, token_attr, attr_target);
         }*/
 
-        if let Some(attr) = &attr {
-            if !self.cx.ecfg.custom_inner_attributes()
-                && attr.style == ast::AttrStyle::Inner
-                && !attr.has_name(sym::test)
-            {
-                feature_err(
-                    &self.cx.sess.parse_sess,
-                    sym::custom_inner_attributes,
-                    attr.span,
-                    "non-builtin inner attributes are unstable",
-                )
-                .emit();
-            }
-        }
         attr
     }
 

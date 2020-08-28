@@ -6,7 +6,7 @@ use rustc_ast::ptr::P;
 use rustc_ast::{self as ast, AttrItem, Attribute, MetaItem};
 use rustc_ast::tokenstream::{PreexpTokenStream, PreexpTokenTree, TokenStream};
 use rustc_attr as attr;
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::map_in_place::MapInPlace;
 use rustc_errors::{error_code, struct_span_err, Applicability, Handler};
 use rustc_feature::{Feature, Features, State as FeatureState};
@@ -27,6 +27,8 @@ use smallvec::SmallVec;
 pub struct StripUnconfigured<'a> {
     pub sess: &'a Session,
     pub features: Option<&'a Features>,
+    // FIXME: make this private?
+    pub cfg_attr_errors: FxHashSet<Span>,
 }
 
 fn get_features(
@@ -197,7 +199,7 @@ fn get_features(
 
 // `cfg_attr`-process the crate's attributes and compute the crate's features.
 pub fn features(sess: &Session, mut krate: ast::Crate) -> (ast::Crate, Features) {
-    let mut strip_unconfigured = StripUnconfigured { sess, features: None };
+    let mut strip_unconfigured = StripUnconfigured { sess, features: None, cfg_attr_errors: Default::default() };
 
     let unconfigured_attrs = krate.attrs.clone();
     let diag = &sess.parse_sess.span_diagnostic;
@@ -327,7 +329,7 @@ impl<'a> StripUnconfigured<'a> {
             .collect()
     }
 
-    fn parse_cfg_attr(&self, attr: &Attribute) -> Option<(MetaItem, Vec<CfgAttrItem>)> {
+    fn parse_cfg_attr(&mut self, attr: &Attribute) -> Option<(MetaItem, Vec<CfgAttrItem>)> {
         match attr.get_normal_item().args {
             ast::MacArgs::Delimited(dspan, delim, ref tts) if !tts.is_empty() => {
                 let msg = "wrong `cfg_attr` delimiters";
@@ -350,19 +352,21 @@ impl<'a> StripUnconfigured<'a> {
         None
     }
 
-    fn error_malformed_cfg_attr_missing(&self, span: Span) {
-        self.sess
-            .parse_sess
-            .span_diagnostic
-            .struct_span_err(span, "malformed `cfg_attr` attribute input")
-            .span_suggestion(
-                span,
-                "missing condition and attribute",
-                CFG_ATTR_GRAMMAR_HELP.to_string(),
-                Applicability::HasPlaceholders,
-            )
-            .note(CFG_ATTR_NOTE_REF)
-            .emit();
+    fn error_malformed_cfg_attr_missing(&mut self, span: Span) {
+        if self.cfg_attr_errors.insert(span) {
+            self.sess
+                .parse_sess
+                .span_diagnostic
+                .struct_span_err(span, "malformed `cfg_attr` attribute input")
+                .span_suggestion(
+                    span,
+                    "missing condition and attribute",
+                    CFG_ATTR_GRAMMAR_HELP.to_string(),
+                    Applicability::HasPlaceholders,
+                )
+                .note(CFG_ATTR_NOTE_REF)
+                .emit();
+        }
     }
 
     /// Determines if a node with the given attributes should be included in this configuration.
