@@ -21,7 +21,6 @@ use rustc_macros::HashStable_Generic;
 use rustc_span::{Span, DUMMY_SP};
 use smallvec::{smallvec, SmallVec};
 
-use std::backtrace::Backtrace;
 use std::{iter, mem};
 
 /// When the main rust parser encounters a syntax-extension invocation, it
@@ -434,14 +433,6 @@ impl DelimSpan {
 
     pub fn entire(self) -> Span {
         self.open.with_hi(self.close.hi())
-    }
-}
-
-#[derive(Clone, Default, Encodable, Decodable)]
-struct DisplayStr(String);
-impl std::fmt::Debug for DisplayStr {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", self.0)
     }
 }
 

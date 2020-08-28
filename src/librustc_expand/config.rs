@@ -3,8 +3,8 @@
 use rustc_ast::attr::HasAttrs;
 use rustc_ast::mut_visit::*;
 use rustc_ast::ptr::P;
-use rustc_ast::tokenstream::{PreexpTokenStream, PreexpTokenTree, TokenStream};
-use rustc_ast::{self as ast, AttrItem, Attribute, MetaItem};
+use rustc_ast::tokenstream::{PreexpTokenStream, PreexpTokenTree};
+use rustc_ast::{self as ast, Attribute, MetaItem};
 use rustc_attr as attr;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::map_in_place::MapInPlace;
@@ -344,7 +344,7 @@ impl<'a> StripUnconfigured<'a> {
                     }
                 }
             }
-            ref args => self.error_malformed_cfg_attr_missing(attr.span),
+            _ => self.error_malformed_cfg_attr_missing(attr.span),
         }
         None
     }
@@ -535,8 +535,7 @@ impl<'a> MutVisitor for StripUnconfigured<'a> {
         noop_flat_map_stmt(configure!(self, stmt), self)
     }
 
-    fn flat_map_item(&mut self, mut item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
-        //item.tokens = item.tokens.clone().map(|tokens| self.configure_tokens(tokens));
+    fn flat_map_item(&mut self, item: P<ast::Item>) -> SmallVec<[P<ast::Item>; 1]> {
         noop_flat_map_item(configure!(self, item), self)
     }
 

@@ -1079,7 +1079,7 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
     ) -> Option<ast::Attribute> {
         let mut attr = None;
         let has_attrs = !attr_target.attrs().is_empty();
-        attr_target.visit_attrs(|mut attrs| {
+        attr_target.visit_attrs(|attrs| {
             attrs
                 .iter()
                 .position(|a| {
@@ -1152,9 +1152,9 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
         &mut self,
         item: &mut (impl HasAttrs + std::fmt::Debug),
     ) -> (Option<ast::Attribute>, Vec<Path>, /* after_derive */ bool) {
-        let (mut attr, mut traits, mut after_derive) = (None, Vec::new(), false);
+        let (mut traits, mut after_derive) = (Vec::new(), false);
 
-        attr = self.find_attr_invoc(item, &mut after_derive);
+        let attr = self.find_attr_invoc(item, &mut after_derive);
         item.visit_attrs(|mut attrs| {
             traits = collect_derives(&mut self.cx, &mut attrs);
         });
@@ -1169,9 +1169,9 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
         &mut self,
         nonitem: &mut (impl HasAttrs + std::fmt::Debug),
     ) -> (Option<ast::Attribute>, /* after_derive */ bool) {
-        let (mut attr, mut after_derive) = (None, false);
+        let mut after_derive = false;
 
-        attr = self.find_attr_invoc(nonitem, &mut after_derive);
+        let attr = self.find_attr_invoc(nonitem, &mut after_derive);
 
         (attr, after_derive)
     }

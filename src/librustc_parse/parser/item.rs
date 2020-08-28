@@ -9,7 +9,7 @@ use rustc_ast::token::{self, TokenKind};
 use rustc_ast::tokenstream::{
     AttributesData, DelimSpan, IsJoint, PreexpTokenStream, PreexpTokenTree, TokenStream, TokenTree,
 };
-use rustc_ast::{self as ast, AttrStyle, AttrVec, Attribute, DUMMY_NODE_ID};
+use rustc_ast::{self as ast, AttrVec, Attribute, DUMMY_NODE_ID};
 use rustc_ast::{AssocItem, AssocItemKind, ForeignItemKind, Item, ItemKind, Mod};
 use rustc_ast::{Async, Const, Defaultness, IsAuto, Mutability, Unsafe, UseTree, UseTreeKind};
 use rustc_ast::{BindingMode, Block, FnDecl, FnSig, Param, SelfKind};

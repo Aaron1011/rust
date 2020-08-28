@@ -17,7 +17,6 @@ use rustc_errors::{Applicability, DiagnosticBuilder, PResult};
 use rustc_span::source_map::{self, Span, Spanned};
 use rustc_span::symbol::{kw, sym, Ident, Symbol};
 use std::mem;
-use tracing::debug;
 
 /// Possibly accepts an `token::Interpolated` expression (a pre-parsed expression
 /// dropped into the token stream, which happens while parsing the result of

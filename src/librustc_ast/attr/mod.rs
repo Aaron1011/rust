@@ -614,7 +614,7 @@ impl HasAttrs for Vec<Attribute> {
     fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
         f(self)
     }
-    fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {}
+    fn visit_tokens(&mut self, _f: impl FnOnce(&mut PreexpTokenStream)) {}
 }
 
 impl HasAttrs for AttrVec {
@@ -628,7 +628,7 @@ impl HasAttrs for AttrVec {
             vec.into()
         });
     }
-    fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {}
+    fn visit_tokens(&mut self, _f: impl FnOnce(&mut PreexpTokenStream)) {}
 }
 
 impl<T: HasAttrs + 'static> HasAttrs for P<T> {
@@ -695,7 +695,7 @@ macro_rules! derive_has_attrs {
             fn visit_attrs(&mut self, f: impl FnOnce(&mut Vec<Attribute>)) {
                 self.attrs.visit_attrs(f);
             }
-            fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {}
+            fn visit_tokens(&mut self, _f: impl FnOnce(&mut PreexpTokenStream)) {}
         }
     )* }
 }
