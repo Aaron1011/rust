@@ -31,8 +31,8 @@ pub(super) const DEFAULT_INNER_ATTR_FORBIDDEN: InnerAttrPolicy<'_> = InnerAttrPo
 };
 
 impl<'a> Parser<'a> {
-    fn has_any_attributes(&self) -> bool {
-        self.token == token::Pound || matches!(self.token.kind, token::DocComment(..))
+    fn has_any_attributes(&mut self) -> bool {
+        self.check(&token::Pound) || matches!(self.token.kind, token::DocComment(..))
     }
 
     fn parse_outer_attributes_(&mut self) -> PResult<'a, Vec<ast::Attribute>> {
