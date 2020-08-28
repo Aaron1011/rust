@@ -863,7 +863,8 @@ impl<'a> Parser<'a> {
                     let mut comma_sp = None;
                     if this.token == token::Comma {
                         // Issue #49257
-                        let nw_span = this.sess.source_map().span_until_non_whitespace(this.token.span);
+                        let nw_span =
+                            this.sess.source_map().span_until_non_whitespace(this.token.span);
                         etc_sp = etc_sp.to(nw_span);
                         err.span_label(
                             etc_sp,
@@ -920,7 +921,7 @@ impl<'a> Parser<'a> {
             });
             match should_break {
                 Ok(true) => break,
-                Ok(false) => {},
+                Ok(false) => {}
                 Err(err) => {
                     if let Some(delayed) = delayed_err.as_mut() {
                         delayed.emit();

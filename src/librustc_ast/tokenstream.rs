@@ -452,7 +452,7 @@ pub struct PreexpTokenStream(pub Lrc<Vec<(PreexpTokenTree, IsJoint)>>);
 pub enum PreexpTokenTree {
     Token(Token),
     Delimited(DelimSpan, DelimToken, PreexpTokenStream),
-    OuterAttributes(AttributesData)
+    OuterAttributes(AttributesData),
 }
 
 impl PreexpTokenStream {
@@ -466,40 +466,62 @@ impl PreexpTokenStream {
     }
 
     pub fn to_tokenstream(self) -> TokenStream {
-        let trees: Vec<_> = self.0.iter().flat_map(|tree| match &tree.0 {
-            PreexpTokenTree::Token(inner) => vec![(TokenTree::Token(inner.clone()), tree.1)].into_iter(),
-            PreexpTokenTree::Delimited(span, delim, stream) => {
-                vec![(TokenTree::Delimited(*span, *delim, stream.clone().to_tokenstream()), tree.1)].into_iter()
-            }
-            PreexpTokenTree::OuterAttributes(data) => {
-                //eprintln!("Converting attributes: {:?}", data);
-                //eprintln!("{}", std::backtrace::Backtrace::capture());
-                /*let mut builder = TokenStreamBuilder::new();
-                for (_attr, tokens) in &data.attrs {
-                    builder.push(tokens.clone());
+        let trees: Vec<_> = self
+            .0
+            .iter()
+            .flat_map(|tree| match &tree.0 {
+                PreexpTokenTree::Token(inner) => {
+                    vec![(TokenTree::Token(inner.clone()), tree.1)].into_iter()
                 }
-                builder.push(data.tokens.clone().to_tokenstream());
-                builder.build()*/
+                PreexpTokenTree::Delimited(span, delim, stream) => vec![(
+                    TokenTree::Delimited(*span, *delim, stream.clone().to_tokenstream()),
+                    tree.1,
+                )]
+                .into_iter(),
+                PreexpTokenTree::OuterAttributes(data) => {
+                    //eprintln!("Converting attributes: {:?}", data);
+                    //eprintln!("{}", std::backtrace::Backtrace::capture());
+                    /*let mut builder = TokenStreamBuilder::new();
+                    for (_attr, tokens) in &data.attrs {
+                        builder.push(tokens.clone());
+                    }
+                    builder.push(data.tokens.clone().to_tokenstream());
+                    builder.build()*/
 
-                let flat: Vec<_> = data.attrs.iter().flat_map(|attr| attr.tokens.as_ref().expect("Missing tokens").0.iter().cloned())
-                    .chain(data.tokens.clone().to_tokenstream().0.iter().cloned())
-                    .collect();
-                flat.into_iter()
-                //let tokens: Vec<_> = data.tokens.clone().to_tokenstream().0.iter().cloned().collect();
-                //tokens.into_iter()
-            }
-        }).collect();
+                    let flat: Vec<_> = data
+                        .attrs
+                        .iter()
+                        .flat_map(|attr| {
+                            attr.tokens.as_ref().expect("Missing tokens").0.iter().cloned()
+                        })
+                        .chain(data.tokens.clone().to_tokenstream().0.iter().cloned())
+                        .collect();
+                    flat.into_iter()
+                    //let tokens: Vec<_> = data.tokens.clone().to_tokenstream().0.iter().cloned().collect();
+                    //tokens.into_iter()
+                }
+            })
+            .collect();
         TokenStream::new(trees)
     }
 
     pub fn from_tokenstream(stream: TokenStream) -> PreexpTokenStream {
-        let trees: Vec<_> = stream.0.iter().cloned().map(|tree| {
-            let new_tree = match tree.0 {
-                TokenTree::Token(token) => PreexpTokenTree::Token(token),
-                TokenTree::Delimited(sp, delim, inner) => PreexpTokenTree::Delimited(sp, delim, PreexpTokenStream::from_tokenstream(inner))
-            };
-            (new_tree, tree.1)
-        }).collect();
+        let trees: Vec<_> = stream
+            .0
+            .iter()
+            .cloned()
+            .map(|tree| {
+                let new_tree = match tree.0 {
+                    TokenTree::Token(token) => PreexpTokenTree::Token(token),
+                    TokenTree::Delimited(sp, delim, inner) => PreexpTokenTree::Delimited(
+                        sp,
+                        delim,
+                        PreexpTokenStream::from_tokenstream(inner),
+                    ),
+                };
+                (new_tree, tree.1)
+            })
+            .collect();
         PreexpTokenStream::new(trees)
     }
 }
@@ -507,5 +529,5 @@ impl PreexpTokenStream {
 #[derive(Clone, Debug, Encodable, Decodable)]
 pub struct AttributesData {
     pub attrs: Vec<crate::Attribute>,
-    pub tokens: PreexpTokenStream
+    pub tokens: PreexpTokenStream,
 }

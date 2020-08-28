@@ -6,7 +6,9 @@ use crate::maybe_whole;
 
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, TokenKind};
-use rustc_ast::tokenstream::{DelimSpan, TokenStream, TokenTree, PreexpTokenTree, PreexpTokenStream, AttributesData, IsJoint};
+use rustc_ast::tokenstream::{
+    AttributesData, DelimSpan, IsJoint, PreexpTokenStream, PreexpTokenTree, TokenStream, TokenTree,
+};
 use rustc_ast::{self as ast, AttrStyle, AttrVec, Attribute, DUMMY_NODE_ID};
 use rustc_ast::{AssocItem, AssocItemKind, ForeignItemKind, Item, ItemKind, Mod};
 use rustc_ast::{Async, Const, Defaultness, IsAuto, Mutability, Unsafe, UseTree, UseTreeKind};
@@ -118,14 +120,17 @@ impl<'a> Parser<'a> {
                         mem::swap(&mut data.attrs, &mut attrs);
                         data.attrs.extend(attrs);
                         debug!("new data: {:?}", data);
-                        *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+                        *tokens = PreexpTokenStream::new(vec![(
+                            PreexpTokenTree::OuterAttributes(data),
+                            joint,
+                        )]);
                     } else {
                         assert!(item.attrs.is_empty(), "Non-empty attributes: {:?}", item.attrs);
-                        let data = AttributesData {
-                            attrs: attrs.clone(),
-                            tokens: tokens.clone()
-                        };
-                        *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint)])
+                        let data = AttributesData { attrs: attrs.clone(), tokens: tokens.clone() };
+                        *tokens = PreexpTokenStream::new(vec![(
+                            PreexpTokenTree::OuterAttributes(data),
+                            IsJoint::NonJoint,
+                        )])
                     }
                 } else {
                     panic!("Missing tokens for {:?}", item);
@@ -1829,12 +1834,12 @@ impl<'a> Parser<'a> {
     }
 
     fn recover_first_param(&mut self) -> &'static str {
-        let res = self.parse_outer_attributes(|this, _attrs| {
-            this.parse_self_param()
-        }).map_err(|mut err| err.cancel());
+        let res = self
+            .parse_outer_attributes(|this, _attrs| this.parse_self_param())
+            .map_err(|mut err| err.cancel());
         match res {
             Ok(Some(_)) => "method",
-            _ => "function"
+            _ => "function",
         }
     }
 }

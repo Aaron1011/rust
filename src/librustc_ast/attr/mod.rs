@@ -8,7 +8,7 @@ use crate::ast::{Path, PathSegment};
 use crate::mut_visit::visit_clobber;
 use crate::ptr::P;
 use crate::token::{self, CommentKind, Token};
-use crate::tokenstream::{DelimSpan, TokenStream, TokenTree, TreeAndJoint, PreexpTokenStream};
+use crate::tokenstream::{DelimSpan, PreexpTokenStream, TokenStream, TokenTree, TreeAndJoint};
 
 use rustc_index::bit_set::GrowableBitSet;
 use rustc_span::source_map::{BytePos, Spanned};
@@ -354,7 +354,13 @@ pub fn mk_doc_comment(
     data: Symbol,
     span: Span,
 ) -> Attribute {
-    Attribute { kind: AttrKind::DocComment(comment_kind, data), id: mk_attr_id(), style, span, tokens: None }
+    Attribute {
+        kind: AttrKind::DocComment(comment_kind, data),
+        id: mk_attr_id(),
+        style,
+        span,
+        tokens: None,
+    }
 }
 
 pub fn list_contains_name(items: &[NestedMetaItem], name: Symbol) -> bool {
@@ -643,9 +649,7 @@ impl HasAttrs for StmtKind {
             StmtKind::Local(ref local) => local.attrs(),
             StmtKind::Expr(ref expr) | StmtKind::Semi(ref expr) => expr.attrs(),
             StmtKind::Empty | StmtKind::Item(..) => &[],
-            StmtKind::MacCall(ref mac) => {
-                mac.attrs.attrs()
-            }
+            StmtKind::MacCall(ref mac) => mac.attrs.attrs(),
         }
     }
 
@@ -654,9 +658,7 @@ impl HasAttrs for StmtKind {
             StmtKind::Local(local) => local.visit_attrs(f),
             StmtKind::Expr(expr) | StmtKind::Semi(expr) => expr.visit_attrs(f),
             StmtKind::Empty | StmtKind::Item(..) => {}
-            StmtKind::MacCall(mac) => {
-                mac.deref_mut().attrs.visit_attrs(f)
-            }
+            StmtKind::MacCall(mac) => mac.deref_mut().attrs.visit_attrs(f),
         }
     }
     fn visit_tokens(&mut self, f: impl FnOnce(&mut PreexpTokenStream)) {
@@ -665,11 +667,8 @@ impl HasAttrs for StmtKind {
             StmtKind::Expr(expr) | StmtKind::Semi(expr) => expr.visit_tokens(f),
             // FIXME: Is this correct?
             StmtKind::Empty | StmtKind::Item(..) => {}
-            StmtKind::MacCall(mac) => {
-                mac.deref_mut().attrs.visit_tokens(f)
-            }
+            StmtKind::MacCall(mac) => mac.deref_mut().attrs.visit_tokens(f),
         }
-
     }
 }
 

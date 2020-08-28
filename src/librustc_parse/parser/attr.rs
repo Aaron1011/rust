@@ -2,7 +2,9 @@ use super::{Parser, PathStyle};
 use rustc_ast as ast;
 use rustc_ast::attr;
 use rustc_ast::token::{self, Nonterminal};
-use rustc_ast::tokenstream::{AttributesData, PreexpTokenStream, PreexpTokenTree, IsJoint, TokenStream};
+use rustc_ast::tokenstream::{
+    AttributesData, IsJoint, PreexpTokenStream, PreexpTokenTree, TokenStream,
+};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{error_code, PResult};
 use rustc_span::Span;
@@ -21,7 +23,7 @@ const DEFAULT_UNEXPECTED_INNER_ATTR_ERR_MSG: &str = "an inner attribute is not \
 pub struct CfgAttrItem {
     pub item: ast::AttrItem,
     pub span: Span,
-    pub tokens: TokenStream
+    pub tokens: TokenStream,
 }
 
 pub(super) const DEFAULT_INNER_ATTR_FORBIDDEN: InnerAttrPolicy<'_> = InnerAttrPolicy::Forbidden {
@@ -59,7 +61,8 @@ impl<'a> Parser<'a> {
                     just_parsed_doc_comment = false;
                     Ok((Some(attr), Vec::new())) // Attributes don't have their own attributes
                 } else if let token::DocComment(comment_kind, attr_style, data) = this.token.kind {
-                    let attr = attr::mk_doc_comment(comment_kind, attr_style, data, this.token.span);
+                    let attr =
+                        attr::mk_doc_comment(comment_kind, attr_style, data, this.token.span);
                     if attr.style != ast::AttrStyle::Outer {
                         this.sess
                             .span_diagnostic
@@ -93,23 +96,21 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_outer_attributes<R>(
         &mut self,
-        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
+        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>,
     ) -> PResult<'a, R> {
         self.parse_outer_attributes_with_tokens(f).map(|(res, _tokens)| res)
     }
 
-
     /// Parses attributes that appear before an item.
     pub(super) fn parse_outer_attributes_with_tokens<R>(
         &mut self,
-        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>
+        f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>,
     ) -> PResult<'a, (R, Option<PreexpTokenStream>)> {
-
         let force_collect = std::mem::replace(&mut self.force_capture_tokens, false);
 
         if !(self.has_any_attributes() || force_collect) {
             let res = f(self, Vec::new())?;
-            return Ok((res, None))
+            return Ok((res, None));
         }
 
         let attrs = self.parse_outer_attributes_()?;
@@ -123,24 +124,22 @@ impl<'a> Parser<'a> {
         })?;
         res.map(|inner| (inner, Some(tokens)))
 
+        /*let new_depth = self.token_cursor.stack.len();
+        let frame = if new_depth == start_depth + 1 {
+            self.token_cursor.stack.last_mut().unwrap()
+        } else if new_depth == start_depth {
+            &mut self.token_cursor.frame
+        } else {
+            self.struct_span_err(self.token.span, "Weird depth").emit();
+            panic!();
+        };
+        let end = if frame.close_delim {
+            frame.modified_stream.len()
+        } else {
+            frame.modified_stream.len() - 1
+        };*/
 
-
-            /*let new_depth = self.token_cursor.stack.len();
-            let frame = if new_depth == start_depth + 1 {
-                self.token_cursor.stack.last_mut().unwrap()
-            } else if new_depth == start_depth {
-                &mut self.token_cursor.frame
-            } else {
-                self.struct_span_err(self.token.span, "Weird depth").emit();
-                panic!();
-            };
-            let end = if frame.close_delim {
-                frame.modified_stream.len()
-            } else {
-                frame.modified_stream.len() - 1
-            };*/
-
-            /*let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
+        /*let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
             let data = AttributesData {
                 attrs,
                 tokens: PreexpTokenStream::new(all_tokens)
@@ -299,13 +298,12 @@ impl<'a> Parser<'a> {
         let mut expanded_attrs = Vec::with_capacity(1);
         while self.token.kind != token::Eof {
             let lo = self.token.span;
-            let (item, tokens) = self.collect_tokens(|this| {
-                this.parse_attr_item().map(|item| (item, Vec::new()))
-            })?;
+            let (item, tokens) =
+                self.collect_tokens(|this| this.parse_attr_item().map(|item| (item, Vec::new())))?;
             expanded_attrs.push(CfgAttrItem {
                 item,
                 span: lo.to(self.prev_token.span),
-                tokens: tokens.to_tokenstream()
+                tokens: tokens.to_tokenstream(),
             });
 
             if !self.eat(&token::Comma) {

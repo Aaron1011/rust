@@ -4,7 +4,7 @@ use crate::module::DirectoryOwnership;
 use rustc_ast::mut_visit::{self, MutVisitor};
 use rustc_ast::ptr::P;
 use rustc_ast::token;
-use rustc_ast::tokenstream::{self, TokenStream, PreexpTokenStream};
+use rustc_ast::tokenstream::{self, PreexpTokenStream, TokenStream};
 use rustc_ast::visit::{AssocCtxt, Visitor};
 use rustc_ast::{self as ast, Attribute, NodeId, PatKind};
 use rustc_attr::{self as attr, Deprecation, HasAttrs, Stability};
@@ -99,7 +99,6 @@ impl HasAttrs for Annotatable {
             Annotatable::Variant(v) => v.visit_tokens(f),
         }
     }
-
 }
 
 impl Annotatable {

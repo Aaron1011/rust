@@ -77,8 +77,11 @@ impl<'a> Parser<'a> {
                 if this.check_lifetime() {
                     let lifetime = this.expect_lifetime();
                     // Parse lifetime parameter.
-                    let bounds =
-                        if this.eat(&token::Colon) { this.parse_lt_param_bounds() } else { Vec::new() };
+                    let bounds = if this.eat(&token::Colon) {
+                        this.parse_lt_param_bounds()
+                    } else {
+                        Vec::new()
+                    };
                     params.push(ast::GenericParam {
                         ident: lifetime.ident,
                         id: lifetime.id,
@@ -122,12 +125,15 @@ impl<'a> Parser<'a> {
                             .span_label(attrs[0].span, "attributes must go before parameters")
                             .emit();
                         } else {
-                            this.struct_span_err(attrs[0].span, "attribute without generic parameters")
-                                .span_label(
-                                    attrs[0].span,
-                                    "attributes are only permitted when preceding parameters",
-                                )
-                                .emit();
+                            this.struct_span_err(
+                                attrs[0].span,
+                                "attribute without generic parameters",
+                            )
+                            .span_label(
+                                attrs[0].span,
+                                "attributes are only permitted when preceding parameters",
+                            )
+                            .emit();
                         }
                     }
                     return Ok(true);

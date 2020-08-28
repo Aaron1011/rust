@@ -98,9 +98,9 @@ impl<'a> Parser<'a> {
         // in advance whether or not a proc-macro will be (transitively) invoked,
         // we always capture tokens for any `Nonterminal` which needs them.
         Ok(match kind {
-            NonterminalKind::Item => match self.collect_tokens(|this| {
-                this.parse_item().map(|item| (item, Vec::new()))
-            })? {
+            NonterminalKind::Item => match self
+                .collect_tokens(|this| this.parse_item().map(|item| (item, Vec::new())))?
+            {
                 (Some(mut item), tokens) => {
                     // If we captured tokens during parsing (due to outer attributes),
                     // use those.
@@ -119,7 +119,8 @@ impl<'a> Parser<'a> {
                 None => return Err(self.struct_span_err(self.token.span, "expected a statement")),
             },
             NonterminalKind::Pat => {
-                let (mut pat, tokens) = self.collect_tokens(|this| this.parse_pat(None).map(|pat| (pat, Vec::new())))?;
+                let (mut pat, tokens) =
+                    self.collect_tokens(|this| this.parse_pat(None).map(|pat| (pat, Vec::new())))?;
                 // We have have eaten an NtPat, which could already have tokens
                 if pat.tokens.is_none() {
                     pat.tokens = Some(tokens.to_tokenstream());
@@ -127,7 +128,8 @@ impl<'a> Parser<'a> {
                 token::NtPat(pat)
             }
             NonterminalKind::Expr => {
-                let (mut expr, tokens) = self.collect_tokens(|this| this.parse_expr().map(|expr| (expr, Vec::new())))?;
+                let (mut expr, tokens) =
+                    self.collect_tokens(|this| this.parse_expr().map(|expr| (expr, Vec::new())))?;
                 // If we captured tokens during parsing (due to outer attributes),
                 // use those.
                 if expr.tokens.is_none() {

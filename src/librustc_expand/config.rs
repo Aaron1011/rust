@@ -3,8 +3,8 @@
 use rustc_ast::attr::HasAttrs;
 use rustc_ast::mut_visit::*;
 use rustc_ast::ptr::P;
-use rustc_ast::{self as ast, AttrItem, Attribute, MetaItem};
 use rustc_ast::tokenstream::{PreexpTokenStream, PreexpTokenTree, TokenStream};
+use rustc_ast::{self as ast, AttrItem, Attribute, MetaItem};
 use rustc_attr as attr;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
 use rustc_data_structures::map_in_place::MapInPlace;
@@ -13,8 +13,8 @@ use rustc_feature::{Feature, Features, State as FeatureState};
 use rustc_feature::{
     ACCEPTED_FEATURES, ACTIVE_FEATURES, REMOVED_FEATURES, STABLE_REMOVED_FEATURES,
 };
-use rustc_parse::{parse_in, validate_attr};
 use rustc_parse::parser::attr::CfgAttrItem;
+use rustc_parse::{parse_in, validate_attr};
 use rustc_session::parse::feature_err;
 use rustc_session::Session;
 use rustc_span::edition::{Edition, ALL_EDITIONS};
@@ -199,7 +199,8 @@ fn get_features(
 
 // `cfg_attr`-process the crate's attributes and compute the crate's features.
 pub fn features(sess: &Session, mut krate: ast::Crate) -> (ast::Crate, Features) {
-    let mut strip_unconfigured = StripUnconfigured { sess, features: None, cfg_attr_errors: Default::default() };
+    let mut strip_unconfigured =
+        StripUnconfigured { sess, features: None, cfg_attr_errors: Default::default() };
 
     let unconfigured_attrs = krate.attrs.clone();
     let diag = &sess.parse_sess.span_diagnostic;
@@ -256,21 +257,17 @@ impl<'a> StripUnconfigured<'a> {
     /// attributes and is in the original source code. Gives compiler errors if
     /// the syntax of any `cfg_attr` is incorrect.
     pub fn process_cfg_attrs<T: HasAttrs>(&mut self, node: &mut T) {
-        node.visit_attrs(|attrs| {
-            attrs.flat_map_in_place(|attr| {
-               self.process_cfg_attr(attr)
-            })
-        });
+        node.visit_attrs(|attrs| attrs.flat_map_in_place(|attr| self.process_cfg_attr(attr)));
     }
-    
+
     fn configure_tokens(&mut self, stream: &PreexpTokenStream) -> PreexpTokenStream {
         tracing::debug!("configuring tokens: {:?}", stream);
-        let trees: Vec<_> = stream.0.iter().flat_map(|tree| {
-            match tree.0.clone() {
+        let trees: Vec<_> = stream
+            .0
+            .iter()
+            .flat_map(|tree| match tree.0.clone() {
                 PreexpTokenTree::OuterAttributes(mut data) => {
-                    data.attrs.flat_map_in_place(|attr| {
-                        self.process_cfg_attr(attr)
-                    });
+                    data.attrs.flat_map_in_place(|attr| self.process_cfg_attr(attr));
 
                     if self.in_cfg(data.attrs.iter()) {
                         data.tokens = self.configure_tokens(&data.tokens);
@@ -279,12 +276,14 @@ impl<'a> StripUnconfigured<'a> {
                         vec![].into_iter()
                     }
                 }
-                PreexpTokenTree::Delimited(sp, delim, inner) => {
-                    vec![(PreexpTokenTree::Delimited(sp, delim, self.configure_tokens(&inner)), tree.1)].into_iter()
-                }
+                PreexpTokenTree::Delimited(sp, delim, inner) => vec![(
+                    PreexpTokenTree::Delimited(sp, delim, self.configure_tokens(&inner)),
+                    tree.1,
+                )]
+                .into_iter(),
                 PreexpTokenTree::Token(_) => vec![tree.clone()].into_iter(),
-            }
-        }).collect();
+            })
+            .collect();
         PreexpTokenStream::new(trees)
     }
 
@@ -345,9 +344,7 @@ impl<'a> StripUnconfigured<'a> {
                     }
                 }
             }
-            ref args => {
-                self.error_malformed_cfg_attr_missing(attr.span)
-            }
+            ref args => self.error_malformed_cfg_attr_missing(attr.span),
         }
         None
     }

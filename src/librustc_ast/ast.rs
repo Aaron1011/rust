@@ -24,7 +24,7 @@ pub use UnsafeSource::*;
 
 use crate::ptr::P;
 use crate::token::{self, CommentKind, DelimToken};
-use crate::tokenstream::{DelimSpan, TokenStream, TokenTree, PreexpTokenStream};
+use crate::tokenstream::{DelimSpan, PreexpTokenStream, TokenStream, TokenTree};
 
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use rustc_data_structures::sync::Lrc;
@@ -922,11 +922,11 @@ impl Stmt {
     pub fn add_trailing_semicolon(mut self) -> Self {
         self.kind = match self.kind {
             StmtKind::Expr(expr) => StmtKind::Semi(expr),
-            StmtKind::MacCall(mac) => StmtKind::MacCall(
-                mac.map(|MacCallStmt { call, style: _, attrs, tokens }| {
+            StmtKind::MacCall(mac) => {
+                StmtKind::MacCall(mac.map(|MacCallStmt { call, style: _, attrs, tokens }| {
                     MacCallStmt { call, style: MacStmtStyle::Semicolon, attrs, tokens }
-                })
-            ),
+                }))
+            }
             kind => kind,
         };
         self

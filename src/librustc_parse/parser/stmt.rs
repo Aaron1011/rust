@@ -10,7 +10,7 @@ use rustc_ast as ast;
 use rustc_ast::ptr::P;
 use rustc_ast::token::{self, TokenKind};
 use rustc_ast::util::classify;
-use rustc_ast::{AttrStyle, AttrVec, Attribute, MacCall, MacStmtStyle, MacCallStmt};
+use rustc_ast::{AttrStyle, AttrVec, Attribute, MacCall, MacCallStmt, MacStmtStyle};
 use rustc_ast::{Block, BlockCheckMode, Expr, ExprKind, Local, Stmt, StmtKind, DUMMY_NODE_ID};
 use rustc_errors::{Applicability, PResult};
 use rustc_span::source_map::{BytePos, Span};
@@ -47,13 +47,18 @@ impl<'a> Parser<'a> {
                 this.bump(); // `var`
                 let msg = "write `let` instead of `var` to introduce a new variable";
                 this.recover_stmt_local(lo, attrs.into(), msg, "let")?
-            } else if this.check_path() && !this.token.is_qpath_start() && !this.is_path_start_item() {
+            } else if this.check_path()
+                && !this.token.is_qpath_start()
+                && !this.is_path_start_item()
+            {
                 // We have avoided contextual keywords like `union`, items with `crate` visibility,
                 // or `auto trait` items. We aim to parse an arbitrary path `a::b` but not something
                 // that starts like a path (1 token), but it fact not a path.
                 // Also, we avoid stealing syntax from `parse_item_`.
                 this.parse_stmt_path_start(lo, attrs)?
-            } else if let Some(item) = this.parse_item_common(attrs.clone(), false, true, |_| true)? {
+            } else if let Some(item) =
+                this.parse_item_common(attrs.clone(), false, true, |_| true)?
+            {
                 // FIXME: Bad copy of attrs
                 this.mk_stmt(lo.to(item.span), StmtKind::Item(P(item)))
             } else if this.eat(&token::Semi) {
@@ -79,7 +84,7 @@ impl<'a> Parser<'a> {
                     expr.tokens = tokens
                 }
             }
-            Some(Stmt { kind: StmtKind::Empty, .. }) => {},
+            Some(Stmt { kind: StmtKind::Empty, .. }) => {}
             Some(Stmt { kind: StmtKind::MacCall(mac), .. }) => mac.tokens = tokens,
             None => {}
         }

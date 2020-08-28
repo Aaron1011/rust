@@ -1898,7 +1898,8 @@ impl<'a> Parser<'a> {
                     |mut err| {
                         match (sm.span_to_lines(expr.span), sm.span_to_lines(arm_start_span)) {
                             (Ok(ref expr_lines), Ok(ref arm_start_lines))
-                                if arm_start_lines.lines[0].end_col == expr_lines.lines[0].end_col
+                                if arm_start_lines.lines[0].end_col
+                                    == expr_lines.lines[0].end_col
                                     && expr_lines.lines.len() == 2
                                     && this.token == token::FatArrow =>
                             {

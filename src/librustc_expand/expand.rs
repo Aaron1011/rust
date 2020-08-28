@@ -10,10 +10,10 @@ use crate::proc_macro::collect_derives;
 use rustc_ast::mut_visit::*;
 use rustc_ast::ptr::P;
 use rustc_ast::token;
-use rustc_ast::tokenstream::{TokenStream, PreexpTokenStream, PreexpTokenTree};
+use rustc_ast::tokenstream::{PreexpTokenStream, PreexpTokenTree, TokenStream};
 use rustc_ast::visit::{self, AssocCtxt, Visitor};
 use rustc_ast::{self as ast, AttrItem, Block, LitKind, NodeId, PatKind, Path};
-use rustc_ast::{ItemKind, MacArgs, MacStmtStyle, StmtKind, MacCallStmt};
+use rustc_ast::{ItemKind, MacArgs, MacCallStmt, MacStmtStyle, StmtKind};
 use rustc_ast_pretty::pprust;
 use rustc_attr::{self as attr, is_builtin_attr, HasAttrs};
 use rustc_data_structures::map_in_place::MapInPlace;
@@ -488,12 +488,17 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                             } else {
                                 panic!("Missing tokens for {:?}", item);
                             };
-                            if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
+                            if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] =
+                                &**tokens.0
+                            {
                                 let mut data = data.clone();
                                 tracing::debug!("attributes before: {:?}", data.attrs);
                                 data.attrs.retain(|a| !a.has_name(sym::derive));
                                 tracing::debug!("remaining attributes: {:?}", data.attrs);
-                                *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+                                *tokens = PreexpTokenStream::new(vec![(
+                                    PreexpTokenTree::OuterAttributes(data),
+                                    joint,
+                                )]);
                             } else {
                                 if !tokens.0.is_empty() {
                                     panic!("Unexpected tokens {:?}", tokens);
@@ -590,7 +595,11 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
 
         let invocations = {
             let mut collector = InvocationCollector {
-                cfg: StripUnconfigured { sess: &self.cx.sess, features: self.cx.ecfg.features, cfg_attr_errors: Default::default() },
+                cfg: StripUnconfigured {
+                    sess: &self.cx.sess,
+                    features: self.cx.ecfg.features,
+                    cfg_attr_errors: Default::default(),
+                },
                 cx: self.cx,
                 invocations: Vec::new(),
                 monotonic: self.monotonic,
@@ -610,7 +619,11 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
     }
 
     fn fully_configure(&mut self, item: Annotatable) -> Annotatable {
-        let mut cfg = StripUnconfigured { sess: &self.cx.sess, features: self.cx.ecfg.features, cfg_attr_errors: Default::default() };
+        let mut cfg = StripUnconfigured {
+            sess: &self.cx.sess,
+            features: self.cx.ecfg.features,
+            cfg_attr_errors: Default::default(),
+        };
         // Since the item itself has already been configured by the InvocationCollector,
         // we know that fold result vector will contain exactly one element
         match item {
@@ -1068,14 +1081,14 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
         let has_attrs = !attr_target.attrs().is_empty();
         attr_target.visit_attrs(|mut attrs| {
             attrs
-            .iter()
-            .position(|a| {
-                if a.has_name(sym::derive) {
-                    *after_derive = true;
-                }
-                !self.cx.sess.is_attr_known(a) && !is_builtin_attr(a)
-            })
-            .map(|i| attr = Some(attrs.remove(i)));
+                .iter()
+                .position(|a| {
+                    if a.has_name(sym::derive) {
+                        *after_derive = true;
+                    }
+                    !self.cx.sess.is_attr_known(a) && !is_builtin_attr(a)
+                })
+                .map(|i| attr = Some(attrs.remove(i)));
         });
 
         let mut has_inner = false;
@@ -1827,7 +1840,7 @@ impl<'a, 'b> MutVisitor for InvocationCollector<'a, 'b> {
                 span: at.span,
                 id: at.id,
                 style: at.style,
-                tokens: None
+                tokens: None,
             };
         } else {
             noop_visit_attribute(at, self)

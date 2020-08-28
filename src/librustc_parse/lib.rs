@@ -460,7 +460,7 @@ pub fn tokenstream_probably_equal_for_proc_macro(
                 }
             }
             (None, None) => return true,
-            _ => return false
+            _ => return false,
         }
     }
 }
