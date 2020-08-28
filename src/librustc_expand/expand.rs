@@ -480,25 +480,28 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
 
                     let mut item = self.fully_configure(item);
                     item.visit_attrs(|attrs| attrs.retain(|a| !a.has_name(sym::derive)));
-                    if let Annotatable::Item(item) = &mut item {
-                        let tokens = if let Some(tokens) = item.tokens.as_mut() {
-                            tokens
-                        } else {
-                            panic!("Missing tokens for {:?}", item);
-                        };
-                        if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
-                            let mut data = data.clone();
-                            tracing::debug!("attributes before: {:?}", data.attrs);
-                            data.attrs.retain(|a| !a.has_name(sym::derive));
-                            tracing::debug!("remaining attributes: {:?}", data.attrs);
-                            *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
-                        } else {
-                            if !tokens.0.is_empty() {
-                                panic!("Unexpected tokens {:?}", tokens);
+
+                    if item.derive_allowed() {
+                        if let Annotatable::Item(item) = &mut item {
+                            let tokens = if let Some(tokens) = item.tokens.as_mut() {
+                                tokens
+                            } else {
+                                panic!("Missing tokens for {:?}", item);
+                            };
+                            if let &[(PreexpTokenTree::OuterAttributes(ref data), joint)] = &**tokens.0 {
+                                let mut data = data.clone();
+                                tracing::debug!("attributes before: {:?}", data.attrs);
+                                data.attrs.retain(|a| !a.has_name(sym::derive));
+                                tracing::debug!("remaining attributes: {:?}", data.attrs);
+                                *tokens = PreexpTokenStream::new(vec![(PreexpTokenTree::OuterAttributes(data), joint)]);
+                            } else {
+                                if !tokens.0.is_empty() {
+                                    panic!("Unexpected tokens {:?}", tokens);
+                                }
                             }
+                        } else {
+                            panic!("Derive on non-item {:?}", item);
                         }
-                    } else {
-                        //panic!("Derive on non-item {:?}", item);
                     }
                     tracing::debug!("item after: {:?}", item);
 
