@@ -104,9 +104,8 @@ impl<'a> Parser<'a> {
         &mut self,
         f: impl FnOnce(&mut Self, Vec<ast::Attribute>) -> PResult<'a, R>,
     ) -> PResult<'a, (R, Option<PreexpTokenStream>)> {
-        let force_collect = std::mem::replace(&mut self.force_capture_tokens, false);
 
-        if !(self.has_any_attributes() || force_collect) {
+        if !self.has_any_attributes() {
             let res = f(self, Vec::new())?;
             return Ok((res, None));
         }
@@ -114,38 +113,10 @@ impl<'a> Parser<'a> {
         let attrs = self.parse_outer_attributes_()?;
 
         let (res, tokens) = self.collect_tokens(|this| {
-            //let start_depth = self.token_cursor.stack.len();
-            //let start_pos = self.token_cursor.frame.modified_stream.len() - 1;
-
             let res = f(this, attrs.clone());
             Ok((res, attrs))
         })?;
         res.map(|inner| (inner, Some(tokens)))
-
-        /*let new_depth = self.token_cursor.stack.len();
-        let frame = if new_depth == start_depth + 1 {
-            self.token_cursor.stack.last_mut().unwrap()
-        } else if new_depth == start_depth {
-            &mut self.token_cursor.frame
-        } else {
-            self.struct_span_err(self.token.span, "Weird depth").emit();
-            panic!();
-        };
-        let end = if frame.close_delim {
-            frame.modified_stream.len()
-        } else {
-            frame.modified_stream.len() - 1
-        };*/
-
-        /*let all_tokens: Vec<_> = frame.modified_stream.drain(start_pos..end).collect();
-            let data = AttributesData {
-                attrs,
-                tokens: PreexpTokenStream::new(all_tokens)
-            };
-            debug!("got AttributesData: {:?}", data);
-            frame.modified_stream.insert(start_pos, (PreexpTokenTree::OuterAttributes(data), IsJoint::NonJoint));
-            Ok(res)
-        })*/
     }
 
     /// Matches `attribute = # ! [ meta_item ]`.

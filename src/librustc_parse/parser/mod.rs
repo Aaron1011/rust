@@ -109,7 +109,6 @@ pub struct Parser<'a> {
     pub last_type_ascription: Option<(Span, bool /* likely path typo */)>,
     /// If present, this `Parser` is not parsing Rust code but rather a macro call.
     subparser_name: Option<&'static str>,
-    force_capture_tokens: bool,
 }
 
 impl<'a> Drop for Parser<'a> {
@@ -391,7 +390,6 @@ impl<'a> Parser<'a> {
             last_unexpected_token_span: None,
             last_type_ascription: None,
             subparser_name,
-            force_capture_tokens: false,
         };
 
         // Make parser point to the first token.
@@ -1171,16 +1169,6 @@ impl<'a> Parser<'a> {
             },
             Err(None) => None,
         }
-    }
-
-    pub fn force_capture_tokens<R>(
-        &mut self,
-        f: impl FnOnce(&mut Self) -> PResult<'a, R>,
-    ) -> PResult<'a, R> {
-        let old_force = std::mem::replace(&mut self.force_capture_tokens, true);
-        let res = f(self);
-        self.force_capture_tokens = old_force;
-        res
     }
 
     #[track_caller]
