@@ -15,8 +15,17 @@ LL | #[cfg_attr(all())]
    = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
    = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
 
+error: expected `,`, found end of `cfg_attr` input
+  --> $DIR/cfg-attr-parse.rs:8:17
+   |
+LL | #[cfg_attr(all())]
+   |                 ^ expected `,`
+   |
+   = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
+   = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
+
 error: expected identifier, found `,`
-  --> $DIR/cfg-attr-parse.rs:16:18
+  --> $DIR/cfg-attr-parse.rs:17:18
    |
 LL | #[cfg_attr(all(),,)]
    |                  ^ expected identifier
@@ -25,7 +34,16 @@ LL | #[cfg_attr(all(),,)]
    = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
 
 error: expected identifier, found `,`
-  --> $DIR/cfg-attr-parse.rs:28:28
+  --> $DIR/cfg-attr-parse.rs:17:18
+   |
+LL | #[cfg_attr(all(),,)]
+   |                  ^ expected identifier
+   |
+   = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
+   = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
+
+error: expected identifier, found `,`
+  --> $DIR/cfg-attr-parse.rs:30:28
    |
 LL | #[cfg_attr(all(), must_use,,)]
    |                            ^ expected identifier
@@ -34,7 +52,25 @@ LL | #[cfg_attr(all(), must_use,,)]
    = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
 
 error: expected identifier, found `,`
-  --> $DIR/cfg-attr-parse.rs:40:40
+  --> $DIR/cfg-attr-parse.rs:30:28
+   |
+LL | #[cfg_attr(all(), must_use,,)]
+   |                            ^ expected identifier
+   |
+   = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
+   = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
+
+error: expected identifier, found `,`
+  --> $DIR/cfg-attr-parse.rs:43:40
+   |
+LL | #[cfg_attr(all(), must_use, deprecated,,)]
+   |                                        ^ expected identifier
+   |
+   = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
+   = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
+
+error: expected identifier, found `,`
+  --> $DIR/cfg-attr-parse.rs:43:40
    |
 LL | #[cfg_attr(all(), must_use, deprecated,,)]
    |                                        ^ expected identifier
@@ -43,7 +79,7 @@ LL | #[cfg_attr(all(), must_use, deprecated,,)]
    = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
 
 error: wrong `cfg_attr` delimiters
-  --> $DIR/cfg-attr-parse.rs:44:11
+  --> $DIR/cfg-attr-parse.rs:48:11
    |
 LL | #[cfg_attr[all(),,]]
    |           ^^^^^^^^^
@@ -54,7 +90,7 @@ LL | #[cfg_attr(all(),,)]
    |           ^       ^
 
 error: expected identifier, found `,`
-  --> $DIR/cfg-attr-parse.rs:44:18
+  --> $DIR/cfg-attr-parse.rs:48:18
    |
 LL | #[cfg_attr[all(),,]]
    |                  ^ expected identifier
@@ -63,7 +99,27 @@ LL | #[cfg_attr[all(),,]]
    = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
 
 error: wrong `cfg_attr` delimiters
-  --> $DIR/cfg-attr-parse.rs:50:11
+  --> $DIR/cfg-attr-parse.rs:48:11
+   |
+LL | #[cfg_attr[all(),,]]
+   |           ^^^^^^^^^
+   |
+help: the delimiters should be `(` and `)`
+   |
+LL | #[cfg_attr(all(),,)]
+   |           ^       ^
+
+error: expected identifier, found `,`
+  --> $DIR/cfg-attr-parse.rs:48:18
+   |
+LL | #[cfg_attr[all(),,]]
+   |                  ^ expected identifier
+   |
+   = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
+   = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
+
+error: wrong `cfg_attr` delimiters
+  --> $DIR/cfg-attr-parse.rs:56:11
    |
 LL | #[cfg_attr{all(),,}]
    |           ^^^^^^^^^
@@ -74,7 +130,7 @@ LL | #[cfg_attr(all(),,)]
    |           ^       ^
 
 error: expected identifier, found `,`
-  --> $DIR/cfg-attr-parse.rs:50:18
+  --> $DIR/cfg-attr-parse.rs:56:18
    |
 LL | #[cfg_attr{all(),,}]
    |                  ^ expected identifier
@@ -82,5 +138,25 @@ LL | #[cfg_attr{all(),,}]
    = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
    = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
 
-error: aborting due to 9 previous errors
+error: wrong `cfg_attr` delimiters
+  --> $DIR/cfg-attr-parse.rs:56:11
+   |
+LL | #[cfg_attr{all(),,}]
+   |           ^^^^^^^^^
+   |
+help: the delimiters should be `(` and `)`
+   |
+LL | #[cfg_attr(all(),,)]
+   |           ^       ^
+
+error: expected identifier, found `,`
+  --> $DIR/cfg-attr-parse.rs:56:18
+   |
+LL | #[cfg_attr{all(),,}]
+   |                  ^ expected identifier
+   |
+   = help: the valid syntax is `#[cfg_attr(condition, attribute, other_attribute, ...)]`
+   = note: for more information, visit <https://doc.rust-lang.org/reference/conditional-compilation.html#the-cfg_attr-attribute>
+
+error: aborting due to 17 previous errors
 
