@@ -806,7 +806,14 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
             | Annotatable::TraitItem(_)
             | Annotatable::ImplItem(_)
             | Annotatable::ForeignItem(_) => return,
-            Annotatable::Stmt(_) => "statements",
+            Annotatable::Stmt(stmt) => {
+                // Attributes are stable on item statements,
+                // but unstable on all other kinds of statements
+                if stmt.is_item() {
+                    return;
+                }
+                "statements"
+            }
             Annotatable::Expr(_) => "expressions",
             Annotatable::Arm(..)
             | Annotatable::Field(..)
@@ -1354,21 +1361,16 @@ impl<'a, 'b> MutVisitor for InvocationCollector<'a, 'b> {
 
         // we'll expand attributes on expressions separately
         if !stmt.is_expr() {
-            let (attr, derives, after_derive) = if stmt.is_item() {
-                // FIXME: Handle custom attributes on statements (#15701)
-                (None, vec![], false)
-            } else {
-                // ignore derives on non-item statements so it falls through
-                // to the unused-attributes lint
-                let (attr, after_derive) = self.classify_nonitem(&mut stmt);
-                (attr, vec![], after_derive)
-            };
+            // ignore derives here - if this is an item, we will
+            // handle them we when process the `StmtKind`. If this isn't
+            // an item, then it will be ignored.
+            let (attr, after_derive) = self.classify_nonitem(&mut stmt);
 
-            if attr.is_some() || !derives.is_empty() {
+            if attr.is_some() {
                 return self
                     .collect_attr(
                         attr,
-                        derives,
+                        vec![],
                         Annotatable::Stmt(P(stmt)),
                         AstFragmentKind::Stmts,
                         after_derive,
@@ -1378,7 +1380,7 @@ impl<'a, 'b> MutVisitor for InvocationCollector<'a, 'b> {
         }
 
         if let StmtKind::MacCall(mac) = stmt.kind {
-            let MacCallStmt { mac, style, attrs } = mac.into_inner();
+            let MacCallStmt { mac, style, attrs, tokens: _ } = mac.into_inner();
             self.check_attributes(&attrs);
             let mut placeholder =
                 self.collect_bang(mac, stmt.span, AstFragmentKind::Stmts).make_stmts();
@@ -1395,10 +1397,10 @@ impl<'a, 'b> MutVisitor for InvocationCollector<'a, 'b> {
         }
 
         // The placeholder expander gives ids to statements, so we avoid folding the id here.
-        let ast::Stmt { id, kind, span, tokens } = stmt;
+        let ast::Stmt { id, kind, span } = stmt;
         noop_flat_map_stmt_kind(kind, self)
             .into_iter()
-            .map(|kind| ast::Stmt { id, kind, span, tokens: tokens.clone() })
+            .map(|kind| ast::Stmt { id, kind, span })
             .collect()
     }
 

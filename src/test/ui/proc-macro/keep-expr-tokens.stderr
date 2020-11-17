@@ -1,15 +1,19 @@
 error[E0425]: cannot find function `missing_fn` in this scope
-  --> $DIR/keep-expr-tokens.rs:12:17
+  --> $DIR/keep-expr-tokens.rs:15:17
    |
 LL |     for item in missing_fn() {}
    |                 ^^^^^^^^^^ not found in this scope
 
 error[E0425]: cannot find value `bad` in this scope
-  --> $DIR/keep-expr-tokens.rs:14:62
+  --> $DIR/keep-expr-tokens.rs:17:62
    |
 LL |     (#[recollect_attr] #[recollect_attr] ((#[recollect_attr] bad)));
    |                                                              ^^^ not found in this scope
 
-error: aborting due to 2 previous errors
+error: language item required, but not found: `eh_personality`
+
+error: `#[panic_handler]` function required, but not found
+
+error: aborting due to 4 previous errors
 
 For more information about this error, try `rustc --explain E0425`.
