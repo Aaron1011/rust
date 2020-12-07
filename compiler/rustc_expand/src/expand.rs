@@ -721,7 +721,11 @@ impl<'a, 'b> MacroExpander<'a, 'b> {
                 SyntaxExtensionKind::LegacyBang(expander) => {
                     let prev = self.cx.current_expansion.prior_type_ascription;
                     self.cx.current_expansion.prior_type_ascription = mac.prior_type_ascription;
-                    let tok_result = expander.expand(self.cx, span, mac.args.inner_tokens());
+                    // FIXME - this is imprecise. We should try to lint as close to the macro call
+                    // as possible (we cannot take attributes from the macro call itself).
+                    let nearest_parent = self.cx.resolver.lint_node_id(invoc.expansion_data.id);
+                    let tok_result =
+                        expander.expand(self.cx, span, mac.args.inner_tokens(), nearest_parent);
                     let result = if let Some(result) = fragment_kind.make_from(tok_result) {
                         result
                     } else {

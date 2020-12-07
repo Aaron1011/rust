@@ -11,12 +11,14 @@ use crate::mbe::transcribe::transcribe;
 use rustc_ast as ast;
 use rustc_ast::token::{self, NonterminalKind, NtTT, Token, TokenKind::*};
 use rustc_ast::tokenstream::{DelimSpan, TokenStream};
+use rustc_ast::NodeId;
 use rustc_ast_pretty::pprust;
 use rustc_attr::{self as attr, TransparencyError};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::sync::Lrc;
 use rustc_errors::{Applicability, DiagnosticBuilder};
 use rustc_feature::Features;
+use rustc_lint_defs::builtin::MACRO_TRAILING_SEMICOLON;
 use rustc_parse::parser::Parser;
 use rustc_session::parse::ParseSess;
 use rustc_session::Session;
@@ -37,6 +39,7 @@ crate struct ParserAnyMacro<'a> {
     site_span: Span,
     /// The ident of the macro we're parsing
     macro_ident: Ident,
+    nearest_parent: NodeId,
     arm_span: Span,
 }
 
@@ -110,7 +113,8 @@ fn emit_frag_parse_err(
 
 impl<'a> ParserAnyMacro<'a> {
     crate fn make(mut self: Box<ParserAnyMacro<'a>>, kind: AstFragmentKind) -> AstFragment {
-        let ParserAnyMacro { site_span, macro_ident, ref mut parser, arm_span } = *self;
+        let ParserAnyMacro { site_span, macro_ident, ref mut parser, nearest_parent, arm_span } =
+            *self;
         let snapshot = &mut parser.clone();
         let fragment = match parse_ast_fragment(parser, kind) {
             Ok(f) => f,
@@ -124,6 +128,12 @@ impl<'a> ParserAnyMacro<'a> {
         // `macro_rules! m { () => { panic!(); } }` isn't parsed by `.parse_expr()`,
         // but `m!()` is allowed in expression positions (cf. issue #34706).
         if kind == AstFragmentKind::Expr && parser.token == token::Semi {
+            parser.sess.buffer_lint(
+                MACRO_TRAILING_SEMICOLON,
+                parser.token.span,
+                nearest_parent,
+                "trailing semicolon in macro used in expression position",
+            );
             parser.bump();
         }
 
@@ -149,6 +159,7 @@ impl TTMacroExpander for MacroRulesMacroExpander {
         cx: &'cx mut ExtCtxt<'_>,
         sp: Span,
         input: TokenStream,
+        nearest_parent: NodeId,
     ) -> Box<dyn MacResult + 'cx> {
         if !self.valid {
             return DummyResult::any(sp);
@@ -160,6 +171,7 @@ impl TTMacroExpander for MacroRulesMacroExpander {
             self.name,
             self.transparency,
             input,
+            nearest_parent,
             &self.lhses,
             &self.rhses,
         )
@@ -187,6 +199,7 @@ fn generic_extension<'cx>(
     name: Ident,
     transparency: Transparency,
     arg: TokenStream,
+    nearest_parent: NodeId,
     lhses: &[mbe::TokenTree],
     rhses: &[mbe::TokenTree],
 ) -> Box<dyn MacResult + 'cx> {
@@ -287,6 +300,7 @@ fn generic_extension<'cx>(
                     // macro leaves unparsed tokens.
                     site_span: sp,
                     macro_ident: name,
+                    nearest_parent,
                     arm_span,
                 });
             }
