@@ -347,7 +347,6 @@ pub trait TTMacroExpander {
         ecx: &'cx mut ExtCtxt<'_>,
         span: Span,
         input: TokenStream,
-        nearest_parent: NodeId,
     ) -> Box<dyn MacResult + 'cx>;
 }
 
@@ -363,7 +362,6 @@ where
         ecx: &'cx mut ExtCtxt<'_>,
         span: Span,
         input: TokenStream,
-        _nearest_parent: NodeId,
     ) -> Box<dyn MacResult + 'cx> {
         self(ecx, span, input)
     }

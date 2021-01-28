@@ -2835,13 +2835,14 @@ declare_lint! {
 }
 
 declare_lint! {
-    /// The `macro_trailing_semicolon` lint detects trailing semicolons
+    /// The `semicolon_in_expressions_from_macros` lint detects trailing semicolons
     /// in macro bodies when the macro is invoked in expression position.
     /// This was previous accepted, but is being phased out.
     ///
     /// ### Example
     ///
-    /// ```rust
+    /// ```rust,compile-fail
+    /// #![deny(semicolon_in_expressions_from_macros)]
     /// macro_rules! foo {
     ///     () => { true; }
     /// }
@@ -2853,6 +2854,8 @@ declare_lint! {
     ///     };
     /// }
     /// ```
+    ///
+    /// {{produces}}
     ///
     /// ### Explanation
     ///
@@ -2868,7 +2871,7 @@ declare_lint! {
     ///
     /// [issue #79813]: https://github.com/rust-lang/rust/issues/79813
     /// [future-incompatible]: ../index.md#future-incompatible-lints
-    pub MACRO_TRAILING_SEMICOLON,
+    pub SEMICOLON_IN_EXPRESSIONS_FROM_MACROS,
     Allow,
     "trailing semicolon in macro body used as expression",
     @future_incompatible = FutureIncompatibleInfo {
@@ -2964,7 +2967,7 @@ declare_lint_pass! {
         USELESS_DEPRECATED,
         UNSUPPORTED_NAKED_FUNCTIONS,
         MISSING_ABI,
-        MACRO_TRAILING_SEMICOLON,
+        SEMICOLON_IN_EXPRESSIONS_FROM_MACROS,
     ]
 }
 

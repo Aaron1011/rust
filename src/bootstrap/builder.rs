@@ -1254,7 +1254,7 @@ impl<'a> Builder<'a> {
             // This is currently disabled for the stage1 libstd, since build scripts
             // will end up using the bootstrap compiler (which doesn't yet support this lint)
             if compiler.stage != 0 && mode != Mode::Std {
-                lint_flags.push("-Wmacro_trailing_semicolon");
+                lint_flags.push("-Wsemicolon_in_expressions_from_macros");
             }
 
             if self.config.deny_warnings {

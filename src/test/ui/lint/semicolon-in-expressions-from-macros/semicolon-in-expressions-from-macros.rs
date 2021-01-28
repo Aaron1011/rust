@@ -1,5 +1,5 @@
 // check-pass
-#![warn(macro_trailing_semicolon)]
+#![warn(semicolon_in_expressions_from_macros)]
 
 #[allow(dead_code)]
 macro_rules! foo {
@@ -13,17 +13,17 @@ macro_rules! foo {
 
 fn main() {
     // This `allow` doesn't work
-    #[allow(macro_trailing_semicolon)]
+    #[allow(semicolon_in_expressions_from_macros)]
     let _ = {
         foo!(first)
     };
 
     // This 'allow' doesn't work either
-    #[allow(macro_trailing_semicolon)]
+    #[allow(semicolon_in_expressions_from_macros)]
     let _ = foo!(second);
 
     // But this 'allow' does
-    #[allow(macro_trailing_semicolon)]
+    #[allow(semicolon_in_expressions_from_macros)]
     fn inner() {
         let _ = foo!(third);
     }
