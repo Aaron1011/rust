@@ -2841,7 +2841,7 @@ declare_lint! {
     ///
     /// ### Example
     ///
-    /// ```rust,compile-fail
+    /// ```rust,compile_fail
     /// #![deny(semicolon_in_expressions_from_macros)]
     /// macro_rules! foo {
     ///     () => { true; }
