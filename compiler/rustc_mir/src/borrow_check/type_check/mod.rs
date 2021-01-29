@@ -43,6 +43,12 @@ use rustc_trait_selection::traits::{self, ObligationCause, PredicateObligations}
 use crate::dataflow::impls::MaybeInitializedPlaces;
 use crate::dataflow::move_paths::MoveData;
 use crate::dataflow::ResultsCursor;
+<<<<<<< HEAD
+=======
+use crate::transform::{
+    check_consts::ConstCx, promote_consts::is_const_fn_in_array_repeat_expression,
+};
+>>>>>>> 0c81f0f5814 (added a suggestion to create a `const` item if the `fn` in the array repeat expression is a `const fn`)
 
 use crate::borrow_check::{
     borrow_set::BorrowSet,
@@ -1988,18 +1994,31 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                         Operand::Copy(..) | Operand::Constant(..) => {
                             // These are always okay: direct use of a const, or a value that can evidently be copied.
                         }
-                        Operand::Move(_) => {
+                        Operand::Move(place) => {
                             // Make sure that repeated elements implement `Copy`.
                             let span = body.source_info(location).span;
                             let ty = operand.ty(body, tcx);
                             if !self.infcx.type_is_copy_modulo_regions(self.param_env, ty, span) {
+<<<<<<< HEAD
+=======
+                                let ccx = ConstCx::new_with_param_env(tcx, body, self.param_env);
+                                let is_const_fn =
+                                    is_const_fn_in_array_repeat_expression(&ccx, &place, &body);
+
+                                debug!("check_rvalue: is_const_fn={:?}", is_const_fn);
+
+>>>>>>> 0c81f0f5814 (added a suggestion to create a `const` item if the `fn` in the array repeat expression is a `const fn`)
                                 let def_id = body.source.def_id().expect_local();
                                 self.infcx.report_selection_error(
                                     &traits::Obligation::new(
                                         ObligationCause::new(
                                             span,
                                             self.tcx().hir().local_def_id_to_hir_id(def_id),
+<<<<<<< HEAD
                                             traits::ObligationCauseCode::RepeatVec,
+=======
+                                            traits::ObligationCauseCode::RepeatVec(is_const_fn),
+>>>>>>> 0c81f0f5814 (added a suggestion to create a `const` item if the `fn` in the array repeat expression is a `const fn`)
                                         ),
                                         self.param_env,
                                         ty::Binder::bind(ty::TraitRef::new(
