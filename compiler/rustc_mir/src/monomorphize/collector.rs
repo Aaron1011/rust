@@ -539,7 +539,7 @@ fn check_recursion_limit<'tcx>(
     // Code that needs to instantiate the same function recursively
     // more than the recursion limit is assumed to be causing an
     // infinite expansion.
-    if !tcx.sess.recursion_limit().value_within_limit(adjusted_recursion_depth) {
+    if !tcx.recursion_limit(()).value_within_limit(adjusted_recursion_depth) {
         let (shrunk, written_to_path) = shrunk_instance_name(tcx, &instance, 32, 32);
         let error = format!("reached the recursion limit while instantiating `{}`", shrunk);
         let mut err = tcx.sess.struct_span_fatal(span, &error);
@@ -577,7 +577,7 @@ fn check_type_length_limit<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) {
     // which means that rustc basically hangs.
     //
     // Bail out in these cases to avoid that bad user experience.
-    if !tcx.sess.type_length_limit().value_within_limit(type_length) {
+    if !tcx.type_length_limit(()).value_within_limit(type_length) {
         let (shrunk, written_to_path) = shrunk_instance_name(tcx, &instance, 32, 32);
         let msg = format!("reached the type-length limit while instantiating `{}`", shrunk);
         let mut diag = tcx.sess.struct_span_fatal(tcx.def_span(instance.def_id()), &msg);
@@ -814,7 +814,7 @@ impl<'a, 'tcx> MirVisitor<'tcx> for MirNeighborCollector<'a, 'tcx> {
 
     fn visit_operand(&mut self, operand: &mir::Operand<'tcx>, location: Location) {
         self.super_operand(operand, location);
-        let limit = self.tcx.sess.move_size_limit();
+        let limit = self.tcx.move_size_limit(());
         if limit == 0 {
             return;
         }

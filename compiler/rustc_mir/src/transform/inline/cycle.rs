@@ -96,7 +96,7 @@ crate fn mir_callgraph_reachable(
             if seen.insert(callee) {
                 let recursion = recursion_limiter.entry(callee.def_id()).or_default();
                 trace!(?callee, recursion = *recursion);
-                if tcx.sess.recursion_limit().value_within_limit(*recursion) {
+                if tcx.recursion_limit(()).value_within_limit(*recursion) {
                     *recursion += 1;
                     stack.push(callee);
                     let found_recursion = ensure_sufficient_stack(|| {

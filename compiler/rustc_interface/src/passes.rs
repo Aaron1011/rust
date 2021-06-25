@@ -235,10 +235,6 @@ pub fn register_plugins<'a>(
         });
     }
 
-    sess.time("recursion_limit", || {
-        middle::limits::update_limits(sess, &krate);
-    });
-
     let mut lint_store = rustc_lint::new_lint_store(
         sess.opts.debugging_opts.no_interleave_lints,
         sess.unstable_options(),
@@ -339,9 +335,11 @@ fn configure_and_expand_inner<'a>(
 
         // Create the config for macro expansion
         let features = sess.features_untracked();
+        let recursion_limit =
+            rustc_middle::middle::limits::get_recursion_limit(&krate.attrs, &sess);
         let cfg = rustc_expand::expand::ExpansionConfig {
             features: Some(&features),
-            recursion_limit: sess.recursion_limit(),
+            recursion_limit,
             trace_mac: sess.opts.debugging_opts.trace_macros,
             should_test: sess.opts.test,
             span_debug: sess.opts.debugging_opts.span_debug,

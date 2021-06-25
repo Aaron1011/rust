@@ -207,7 +207,7 @@ impl<'tcx> TyCtxt<'tcx> {
         normalize: impl Fn(Ty<'tcx>) -> Ty<'tcx>,
     ) -> Ty<'tcx> {
         for iteration in 0.. {
-            if !self.sess.recursion_limit().value_within_limit(iteration) {
+            if !self.recursion_limit(()).value_within_limit(iteration) {
                 return self.ty_error_with_message(
                     DUMMY_SP,
                     &format!("reached the recursion limit finding the struct tail for {}", ty),
