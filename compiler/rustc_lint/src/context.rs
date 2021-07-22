@@ -734,6 +734,12 @@ pub trait LintContext: Sized {
                         Applicability::MachineApplicable,
                     );
                 }
+                BuiltinLintDiagnostics::TrailingMacro(is_trailing, name) => {
+                    if is_trailing {
+                        db.note("macro invocations at the end of a block are treated as expressions");
+                        db.note(&format!("to ignore the value produced by the macro, add a semicolon after the invocation of `{name}`"));
+                    }
+                }
             }
             // Rewrap `db`, and pass control to the user.
             decorate(LintDiagnosticBuilder::new(db));
